@@ -315,3 +315,18 @@ input,select,textarea{border-radius:4px;color:#292724;border-color:#d3cec5;font-
   margin-bottom: 12px;
 }
 
+.skip-link {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 100;
+  padding: 10px 14px;
+  border-radius: 6px;
+  background: #494847;
+  color: #fff;
+  transform: translateY(-200%);
+}
+.skip-link:focus {
+  transform: translateY(0);
+}
+

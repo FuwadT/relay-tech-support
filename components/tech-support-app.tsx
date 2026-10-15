@@ -444,6 +444,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       <aside className="sidebar">
         <button className="brand" onClick={() => navigate('overview')} aria-label="Relay home">
           <span className="brand-mark">
@@ -455,13 +456,14 @@ export default function TechSupportApp({ displayName }: { displayName: string })
         </button>
         <div className="private-label">EARLY ACCESS</div>
         <nav aria-label="Main navigation">
-          <button className={view === 'overview' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('overview')}>
+          <button aria-current={view === 'overview' ? 'page' : undefined} className={view === 'overview' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('overview')}>
             <LayoutDashboard size={19} />
             Overview
           </button>
           {isStaff && (
             <button
               className={view === 'queue' ? 'nav-item active' : 'nav-item'}
+              aria-current={view === 'queue' ? 'page' : undefined}
               onClick={() => navigate('queue')}
             >
               <Inbox size={19} />
@@ -473,12 +475,13 @@ export default function TechSupportApp({ displayName }: { displayName: string })
           )}
           <button
             className={view === 'cases' || (view === 'detail' && previousView.current === 'cases') ? 'nav-item active' : 'nav-item'}
+            aria-current={view === 'cases' || (view === 'detail' && previousView.current === 'cases') ? 'page' : undefined}
             onClick={() => navigate('cases')}
           >
             <ClipboardList size={19} />
             My cases<span className="nav-count">{cases.length}</span>
           </button>
-          <button className={view === 'new' ? 'nav-item active' : 'nav-item'} onClick={() => start()}>
+          <button aria-current={view === 'new' ? 'page' : undefined} className={view === 'new' ? 'nav-item active' : 'nav-item'} onClick={() => start()}>
             <Plus size={19} />
             New case
           </button>
@@ -531,7 +534,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
           </div>
         </header>
 
-        <main id="main-content">
+        <main id="main-content" tabIndex={-1}>
           {error && (
             <div className="alert error" role="alert">
               {error}

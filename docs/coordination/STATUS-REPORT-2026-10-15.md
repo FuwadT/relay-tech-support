@@ -25,6 +25,8 @@ Before external customer release: verify two real identities and hosted header s
 
 ## Next three tasks and ownership
 
+Additional keyboard improvement verified after this report's initial commit: first Tab focuses Skip to main content; Enter focuses MAIN. Deletion cancellation focus checks also pass. The current view is exposed with aria-current. TypeScript and production build pass after these UI changes. Backend and migration code are unchanged by this final accessibility increment. S6-02 remains in progress for a full screen/contrast review.
+
 1. Codex/integration: review guided PR #3 independently of live AI and complete candidate-specific hosted acceptance through the approved release workflow.
 2. Gemini: acknowledge TO-GEMINI.md, fix the mocked-provider failures on its AI branch and send focused commits; retain diagnostics 1.0.2 and the deletion/focus improvements where applicable.
 3. Platform/interface owners: agree the S6-03 idempotency contract and schema ownership, then implement atomic retries and verify race/failure/deletion cases.
