@@ -417,7 +417,7 @@ input,select,textarea{border-radius:4px;color:#292724;border-color:#d3cec5;font-
 
 /* Small informative text must remain readable on the actual panel backgrounds. */
 .private-label, .user small, .topbar > div, .eyebrow,
-.section-heading > span, .check-navigation > span, .detail-aside small, footer {
+.section-heading > span, .check-navigation > span, .detail-aside small, .workspace-footer {
   color: #54504a;
 }
 button:focus-visible, a:focus-visible, input:focus-visible,
