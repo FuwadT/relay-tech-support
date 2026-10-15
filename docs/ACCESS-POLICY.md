@@ -1,42 +1,33 @@
-# Customer and support permissions — S4-01
+# Relay customer and support permissions
 
-Design completed October 14, 2026. This is the target policy, not a claim that support access is implemented. The current hosted audience remains owner-only.
+Implementation review: October 15, 2026. Applies to the guided candidate source, not a claim that customer/support operations are enabled on the hosted Site. Hosted access remains limited to the owner.
 
-Identity comes exclusively from the Sites authenticated user ID. Email is display data, never a role grant. A server-controlled role grant will identify support users; no browser field, header supplied directly by a visitor, case status, or email domain can grant support access. Missing grants default to customer. Missing identity returns 401.
+Identity comes from Sites-verified user ID and profile headers. Browser cookies, user-supplied role headers and role-switch endpoints cannot grant access. An explicit server-configured support email allowlist is a deployment-operator grant; it defaults empty and does not infer privileges from email domains or test identities. There is no application endpoint for granting roles. The admin type exists in contracts, but the current identity resolver grants only customer or explicitly configured support.
 
-| Operation | Customer, own case | Customer, another case | Support |
+## Current enforced policy
+
+| Operation | Customer, own case | Customer, another case | Explicitly granted support |
 |---|---|---|---|
-| Create a case | Allowed with eligibility and consent | Cannot choose another owner | Create own case only |
-| List/read customer case content | Allowed | Denied (404) | Queue summaries; full content only after assignment |
-| Edit observations, measurements and reported resolution | Allowed | Denied (404) | Denied; add a response instead |
-| Export customer-visible case | Allowed | Denied (404) | Assigned case only, excludes internal notes |
-| Delete case and linked notes/history | Allowed | Denied (404) | Denied |
-| Open support queue | Denied (403) | Denied (403) | Allowed |
-| Claim unassigned work | Denied (403) | Denied (403) | Allowed atomically; reject competing claim |
-| Change support handling status | Denied (403) | Denied (403) | Assigned support user only |
-| Add customer-visible response | Denied (403) | Denied (403) | Assigned support user only |
-| Read/write internal notes | Denied; never in customer payload | Denied | Assigned support user only |
-| Grant/revoke roles | Denied | Denied | Denied in application; deployment operator only |
+| Create/list own cases | Allowed with eligibility and consent | Cannot choose another owner | Create/list own cases |
+| Read case details | Allowed | 404 | All cases for triage |
+| Read support queue | 403 | 403 | All case content, including internal notes, up to current list limit |
+| Edit answers/measurements | Allowed | 404 | Denied by support patch contract, including staff-owned cases |
+| Update public notes and status | Allowed | 404 | All cases |
+| Update assignment/internal notes | 403 | 403 | All cases |
+| Export customer-visible case | Allowed; excludes internal notes | No case payload available | UI export excludes internal notes |
+| Delete case | Allowed | 404 | 403; support cannot delete cases |
+| Grant/revoke roles | Denied | Denied | Denied; deployment operator only |
 
-Customer-reported resolution is independent from support handling status. Assignment must not transfer ownership. A support user retains normal customer rights to their own cases but does not gain customer rights to other cases.
+This candidate uses broad staff triage access. Assignment is a recorded work label, not an authorization boundary or an atomic claim. Do not describe access as restricted to the assigned technician. A future assignment-scoped policy requires new server predicates and race tests before such a promise can be made. No grants or audience permissions were changed by this documentation review.
 
-## Support Access Decision & Scope Alignment (S4 / S5 Implementation)
+Customer payloads explicitly omit internal notes and owner/consent metadata. Cases remain owner-scoped by default; the queue parameter and case detail staff paths require a verified server grant on every request. Mutations validate origin, bounded JSON and allowed fields. Assignment never transfers case ownership.
 
-- **Triage and Queue Discovery**: Support operators require queue visibility (`GET /api/cases?scope=queue`) to monitor incoming unassigned cases, filter by status/category, and triage urgent issues. Operators can inspect unassigned cases to determine the proper tier and assign a technician (`assignedTo`).
-- **Internal Notes Confidentiality**: `internalNotes` are reserved exclusively for staff records. Server-side DTO filtering (`publicCase`) completely strips `internalNotes` from customer payloads, and client export functions (`exportCase`) explicitly omit `internalNotes` from JSON downloads.
-- **Permanent Purge Barrier**: Support operators are prohibited from deleting customer cases (enforced via 403 Forbidden). Case deletion is strictly reserved for the case owner (customer hard-purge) and system administrators.
-- **Resolution Decoupling**: Staff changing case status to `resolved` or `closed` does NOT touch `verifiedAt`. `verifiedAt` remains strictly reserved for customer confirmation.
+A customer setting resolved records their report in verifiedAt. Staff handling changes preserve that field and cannot manufacture a new customer confirmation. Status is currently shared between customer and staff views; independent handling status, customer report history and append-only responses are not implemented. These are limitations to resolve before external support operations. Staff with a personal diagnostic case need an ordinary customer identity until dual-role editing is designed.
 
-- Keep `/api/cases` owner-scoped. Use separate `/api/support` endpoints, server queries, and payload types. Explicit allowlists prevent internal notes from reaching customer list/detail/export responses.
-- Query authorization with the row, including assignment, rather than trusting a prior UI check. Recheck every request; revoked grants and expired sessions take effect on the next request.
-- All mutations require same-origin validation and bounded payload validation. Customers cannot send role, owner, assignment, internal note or verification fields.
-- Verify with customer A, customer B, and support S: list/read/update/delete/export denied across customer owners; support queue denied to A/B; unassigned detail denied to S; assigned response allowed; internal notes absent from every customer response. Add anonymous, revoked-role, invalid-ID and competing-assignment cases.
-- Sign-out uses platform sign-out. Session expiry preserves unsaved input in the current screen and provides a sign-in link; it must never report a successful save.
+## Retention and recovery
 
-## Retention proposal for S4-06
+Owner deletion removes the active case row, including saved answers, measurements and notes. No soft-delete archive is implemented. Backups can retain earlier copies: the local recovery rehearsal demonstrates that restoring a pre-deletion backup resurrects its synthetic record. Actual hosted backup expiry, deletion replay and restore procedures remain required before customer retention promises. See ../docs/RECOVERY.md.
 
-Owner deletion removes the case plus linked response, internal-note and assignment records in one transaction. No hidden soft-delete copy should be introduced without explaining it to customers. Database backups may retain deleted content until backup expiry; actual retention duration and restore procedures must be established and published before customer access. Restores must reapply deletion records or otherwise prevent erased cases from reappearing. Until that mechanism is demonstrated, do not promise immediate erasure from backups.
+## Evidence and remaining release gate
 
-## Release gate
-
-Implementation and three-identity tests remain required. Customer invitations, real support commitments and public access stay disabled until S4-07 and the relevant operational checks pass.
+Local access checks pass with two simulated customers and one explicitly configured support identity: cross-owner CRUD denied, customer queue denied, customer DTOs redact internal notes, staff deletion denied, and staff status changes preserve the customer timestamp. Real hosted owner sign-in and saved journeys have also been exercised on older version 2. These checks do not establish hosted two-user isolation, session expiry or trust-header stripping on the candidate. Customer invitations and staffed support commitments remain disabled until those gates and recovery checks pass.
