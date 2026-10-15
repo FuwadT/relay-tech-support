@@ -23,3 +23,6 @@ Local built Worker: npm.cmd start -- --port8789 --var RELAY_SUPPORT_EMAILS:opera
 Hosted version3 remains unchanged and owner-only. Local browser proof does not certify hosted identity/header handling. User has no second account; keep hosted two-user isolation explicitly unverified and do not widen access. AI UI remains absent and endpoint disabled; Gemini d269437 is received for separate review, not included. No live provider or payments.
 
 Next: finish explicit-discard/mobile checks, review and merge the guided client PR after CI, then stage private version4 and verify the real owner session. Production D1 restore/deletion replay and broad customer release remain separate gates.
+
+## Phone navigation follow-up
+Independent review confirmed the390px navigation clipping defect. Corrected sidebar wrapping, automatic height and full-width wrapping navigation. Final built browser geometry at390px reports no out-of-viewport buttons/inputs/selects/textareas on overview, intake, history or case detail; Metrics screenshot refreshed. This closes that specific finding, not all responsive acceptance. Explicit discard/newattempt source review found no concrete blocker; dedicated browser scenario remains pending. Draft PR8: https://github.com/FuwadT/relay-tech-support/pull/8. Latest build passes after the CSS correction.

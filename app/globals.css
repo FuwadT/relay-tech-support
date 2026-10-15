@@ -428,6 +428,8 @@ textarea:focus-visible, select:focus-visible {
 /* S6-01: 390px Mobile Viewport Safety */
 @media (max-width: 420px) {
   .sidebar {
+    height: auto;
+    padding: 12px;
     flex-wrap: wrap;
     gap: 12px;
   }
