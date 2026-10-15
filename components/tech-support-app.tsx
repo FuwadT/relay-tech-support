@@ -227,6 +227,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
     setForm(initial);
     setDataReady(false);
     setQueueReady(false);
+    setQueueLoading(false);
     setLoading(true);
     setCases([]);
     setQueueCases([]);
@@ -541,6 +542,10 @@ export default function TechSupportApp({ displayName }: { displayName: string })
 
   const isStaff = canAccessQueue(currentUser?.role ?? 'customer');
 
+  function UnavailableRecords() {
+    return <div className="empty" role="status"><h3>Workspace unavailable</h3><p>Records could not be loaded. This does not mean there are no saved cases.</p><button className="button secondary" onClick={() => window.location.reload()}>Reload workspace</button></div>;
+  }
+
   function CaseList({ items, fromQueue = false }: { items: CaseRecord[]; fromQueue?: boolean }) {
     return (
       <div className="case-list">
@@ -607,7 +612,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
             onClick={() => navigate('cases')}
           >
             <ClipboardList size={19} />
-            My cases<span className="nav-count">{cases.length}</span>
+            My cases<span className="nav-count">{dataReady ? cases.length : "—"}</span>
           </button>
           <button
             className={view === 'metrics' ? 'nav-item active' : 'nav-item'}
@@ -733,7 +738,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                   </span>
                   <div>
                     <small>All cases</small>
-                    <strong>{loading ? '—' : cases.length}</strong>
+                    <strong>{loading || !dataReady ? '—' : cases.length}</strong>
                   </div>
                 </div>
                 <div>
@@ -742,7 +747,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                   </span>
                   <div>
                     <small>Working through</small>
-                    <strong>{loading ? '—' : active}</strong>
+                    <strong>{loading || !dataReady ? '—' : active}</strong>
                   </div>
                 </div>
                 <div>
@@ -751,7 +756,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                   </span>
                   <div>
                     <small>Marked resolved</small>
-                    <strong>{loading ? '—' : cases.filter((c) => c.status === 'resolved').length}</strong>
+                    <strong>{loading || !dataReady ? '—' : cases.filter((c) => c.status === 'resolved').length}</strong>
                   </div>
                 </div>
               </section>
@@ -795,7 +800,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                   <Loader2 className="spin" />
                   Loading your workspace…
                 </div>
-              ) : cases.length ? (
+              ) : !dataReady ? (<UnavailableRecords />) : cases.length ? (
                 <CaseList items={cases.slice(0, 4)} />
               ) : (
                 <div className="empty compact">
@@ -855,7 +860,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                   <Loader2 className="spin" />
                   Loading cases…
                 </div>
-              ) : filtered.length ? (
+              ) : !dataReady ? (<UnavailableRecords />) : filtered.length ? (
                 <CaseList items={filtered} />
               ) : (
                 <div className="empty">
@@ -914,25 +919,25 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                     <div className="panel" style={{ padding: '16px 20px' }}>
                       <small className="eyebrow">TOTAL IN QUEUE</small>
                       <strong style={{ fontSize: 26, display: 'block', marginTop: 4 }}>
-                        {queueLoading ? '—' : queueCases.length}
+                        {queueLoading || !queueReady ? '—' : queueCases.length}
                       </strong>
                     </div>
                     <div className="panel" style={{ padding: '16px 20px' }}>
                       <small className="eyebrow" style={{ color: '#9d7c38' }}>UNASSIGNED / OPEN</small>
                       <strong style={{ fontSize: 26, display: 'block', marginTop: 4 }}>
-                        {queueLoading ? '—' : queueCases.filter((c) => c.status === 'open' || !c.assignedTo).length}
+                        {queueLoading || !queueReady ? '—' : queueCases.filter((c) => c.status === 'open' || !c.assignedTo).length}
                       </strong>
                     </div>
                     <div className="panel" style={{ padding: '16px 20px' }}>
                       <small className="eyebrow" style={{ color: '#a85b3b' }}>ESCALATED (NEEDS TECH)</small>
                       <strong style={{ fontSize: 26, display: 'block', marginTop: 4 }}>
-                        {queueLoading ? '—' : queueCases.filter((c) => c.status === 'escalated').length}
+                        {queueLoading || !queueReady ? '—' : queueCases.filter((c) => c.status === 'escalated').length}
                       </strong>
                     </div>
                     <div className="panel" style={{ padding: '16px 20px' }}>
                       <small className="eyebrow" style={{ color: '#4b7a54' }}>RESOLVED</small>
                       <strong style={{ fontSize: 26, display: 'block', marginTop: 4 }}>
-                        {queueLoading ? '—' : queueCases.filter((c) => c.status === 'resolved').length}
+                        {queueLoading || !queueReady ? '—' : queueCases.filter((c) => c.status === 'resolved').length}
                       </strong>
                     </div>
                   </section>
@@ -977,7 +982,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                       <Loader2 className="spin" />
                       Loading support queue…
                     </div>
-                  ) : filteredQueue.length ? (
+                  ) : !queueReady ? (<UnavailableRecords />) : filteredQueue.length ? (
                     <div className="queue-table-container">
                       <table className="queue-table">
                         <thead>
