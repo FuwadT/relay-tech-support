@@ -1,6 +1,6 @@
 import type { Analysis, CaseMeasurements, CaseRecord, Category, DiagnosticCheck, MeasurementComparison, MeasurementDefinition } from './contracts';
 
-export const DIAGNOSTIC_RULE_VERSION = '1.0.1';
+export const DIAGNOSTIC_RULE_VERSION = '1.0.2';
 
 // Old cases without a snapshot are explicitly evaluated using current rules.
 export function caseAnalysis(record: CaseRecord): Analysis {
@@ -34,8 +34,14 @@ export function compareMeasurements(category: Category, measurements?: CaseMeasu
   const followUp = measurements?.followUp ?? {};
 
   return defs.map(def => {
-    const bVal = (typeof baseline[def.id] === 'number') ? baseline[def.id] : null;
-    const fVal = (typeof followUp[def.id] === 'number') ? followUp[def.id] : null;
+    // Historical data can predate server validation. Invalid readings remain
+    // unknown rather than creating a misleading comparison or NaN difference.
+    const validReading = (value: unknown): value is number => typeof value === 'number'
+      && Number.isFinite(value)
+      && (def.min === undefined || value >= def.min)
+      && (def.max === undefined || value <= def.max);
+    const bVal = validReading(baseline[def.id]) ? baseline[def.id] as number : null;
+    const fVal = validReading(followUp[def.id]) ? followUp[def.id] as number : null;
 
     if (bVal === null || fVal === null) {
       return {
@@ -49,7 +55,9 @@ export function compareMeasurements(category: Category, measurements?: CaseMeasu
       };
     }
 
-    const diff = Number((fVal - bVal).toFixed(1));
+    // Avoid floating-point display noise without rounding real sub-0.1 changes
+    // to zero. Direction describes the metric, never proof of a repair.
+    const diff = Number((fVal - bVal).toPrecision(12));
     let direction: 'improved' | 'worsened' | 'unchanged' = 'unchanged';
     const lowerIsBetter = ['app_launch_seconds', 'cpu_percent', 'memory_percent', 'ping_latency_ms'].includes(def.id);
 
@@ -94,20 +102,29 @@ export function analyzeCase(record: Pick<CaseRecord, 'category' | 'answers'> & {
   const nextSteps: string[] = [];
   const evidenceUsed: string[] = [];
 
+  const allowedChecks = getChecks(record.category);
+  const allowedMeasurements = getMeasurementDefinitions(record.category);
+  const usableAnswer = (key: string, value: string) => !['unknown', 'not_tried'].includes(value)
+    && allowedChecks.some(check => check.id === key && check.options.some(option => option.value === value));
+  const usableMeasurement = (key: string, value: unknown) => typeof value === 'number'
+    && Number.isFinite(value)
+    && allowedMeasurements.some(def => def.id === key
+      && (def.min === undefined || value >= def.min)
+      && (def.max === undefined || value <= def.max));
   for (const [k, v] of Object.entries(a)) {
-    if (v && !['unknown', 'not_tried'].includes(v)) {
+    if (usableAnswer(k, v)) {
       evidenceUsed.push(`${k}:${v}`);
     }
   }
 
   if (record.measurements?.baseline) {
     for (const [k, v] of Object.entries(record.measurements.baseline)) {
-      if (typeof v === 'number') evidenceUsed.push(`baseline_${k}:${v}`);
+      if (usableMeasurement(k, v)) evidenceUsed.push(`baseline_${k}:${v}`);
     }
   }
   if (record.measurements?.followUp) {
     for (const [k, v] of Object.entries(record.measurements.followUp)) {
-      if (typeof v === 'number') evidenceUsed.push(`followup_${k}:${v}`);
+      if (usableMeasurement(k, v)) evidenceUsed.push(`followup_${k}:${v}`);
     }
   }
 
@@ -123,6 +140,16 @@ export function analyzeCase(record: Pick<CaseRecord, 'category' | 'answers'> & {
       findings.push('You reported device-wide slowdown without sustained high resource usage or low storage. These observations do not identify a cause.');
       nextSteps.push('Repeat the same activity while the slowdown is happening and record its duration and Task Manager readings. If it persists, share the observations with a trusted technician.');
     }
+    const highRecordedUsage = (['baseline', 'followUp'] as const).some(phase =>
+      ['cpu_percent', 'memory_percent'].some(metric => {
+        const value = record.measurements?.[phase]?.[metric];
+        return typeof value === 'number' && Number.isFinite(value) && value > 90 && value <= 100;
+      })
+    );
+    if (a.resources === 'normal' && highRecordedUsage) {
+      findings.push('You selected no sustained high resource usage, but recorded a CPU or memory reading above 90%. The readings may describe different times or workloads; they do not establish a cause.');
+      nextSteps.push('Compare the timing and workload of those readings with the Task Manager answer. Repeat the observation during the slowdown and correct either entry if needed.');
+    }
   } else {
     if (a.scope === 'all_devices') { findings.push('You reported that multiple devices on the same Wi-Fi are affected.'); nextSteps.push('Check your provider’s official outage information and share the cross-device result with their support team.'); }
     if (a.scope === 'one_device') { findings.push('You reported that only this computer is affected.'); nextSteps.push('Record whether this computer behaves differently on another trusted network, if one is available.'); }
@@ -137,7 +164,7 @@ export function analyzeCase(record: Pick<CaseRecord, 'category' | 'answers'> & {
     }
   }
 
-  const completed = getChecks(record.category).filter(c => a[c.id] && !['unknown','not_tried'].includes(a[c.id])).length;
+  const completed = allowedChecks.filter(c => usableAnswer(c.id, a[c.id])).length;
   if (!findings.length) findings.push(completed ? 'The observations provided do not yet point to a specific explanation.' : 'No conclusive observations have been recorded yet.');
   if (!nextSteps.length) nextSteps.push('Complete the remaining checks and record a repeatable example. Escalate to a trusted technician if the issue continues.');
 

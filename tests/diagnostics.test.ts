@@ -91,3 +91,35 @@ test('ordinary readings do not justify unsupported thermal or power diagnoses',(
   assert.match(result.findings.join(' '),/do not identify a cause/);
   assert.doesNotMatch(result.nextSteps.join(' '),/Best Performance|thermal|indexing/);
 });
+
+test('small recorded changes remain visible rather than becoming unchanged', () => {
+  const comparisons = compareMeasurements('network', {
+    baseline: { download_mbps: 20.01, ping_latency_ms: 1.01, upload_mbps: 0 },
+    followUp: { download_mbps: 20.02, ping_latency_ms: 1.02, upload_mbps: 0 },
+  });
+  assert.equal(comparisons.find(c => c.id === 'download_mbps')?.direction, 'improved');
+  assert.equal(comparisons.find(c => c.id === 'download_mbps')?.difference, 0.01);
+  assert.equal(comparisons.find(c => c.id === 'ping_latency_ms')?.direction, 'worsened');
+  assert.equal(comparisons.find(c => c.id === 'upload_mbps')?.direction, 'unchanged');
+  assert.equal(comparisons.find(c => c.id === 'upload_mbps')?.baseline, 0);
+});
+
+test('invalid historical readings and unrecognized answers do not become evidence', () => {
+  const measurements = { baseline: { download_mbps: NaN, ping_latency_ms: -1, wifi_bars: 99, extra: 10 }, followUp: { download_mbps: 20, ping_latency_ms: 10 } };
+  const result = analyzeCase({ category: 'network', answers: { scope: 'not-an-option', extra: 'yes' }, measurements });
+  assert.match(result.summary, /0 of 4/);
+  assert.deepEqual(result.evidenceUsed, ['followup_download_mbps:20', 'followup_ping_latency_ms:10']);
+  assert.ok(result.comparisons?.every(c => c.direction === 'incomplete'));
+  assert.ok(result.comparisons?.every(c => c.baseline === null));
+});
+
+test('high readings alongside a normal-resource answer request comparable observations', () => {
+  for (const phase of ['baseline', 'followUp'] as const) {
+    for (const metric of ['cpu_percent', 'memory_percent']) {
+      const result = analyzeCase({ category: 'performance', answers: { resources: 'normal' }, measurements: { [phase]: { [metric]: 95 } } });
+      assert.match(result.findings.join(' '), /different times or workloads/);
+      assert.match(result.nextSteps.join(' '), /Compare the timing/);
+      assert.doesNotMatch(result.findings.join(' '), /memory leak|hardware failure/);
+    }
+  }
+});
