@@ -46,15 +46,27 @@ test('S4-01 permissions matrix enforces customer and support role boundaries', (
 });
 
 test('S4-02 resolveRole enforces server-controlled grants and rejects client authority', () => {
-  // Support email allowlist conventions
-  assert.equal(resolveRole('support@relay.test'), 'support');
-  assert.equal(resolveRole('charlie@relay.support'), 'support');
+  const original = process.env.RELAY_SUPPORT_EMAILS;
+  try {
+    // Unconfigured environment defaults strictly to empty allowlist
+    delete process.env.RELAY_SUPPORT_EMAILS;
+    assert.equal(resolveRole('support@relay.test'), 'customer');
+    assert.equal(resolveRole('charlie@relay.support'), 'customer');
 
-  // Standard customer default
-  assert.equal(resolveRole('customer@example.com'), 'customer');
-  assert.equal(resolveRole('alice@relay.test'), 'customer');
-  assert.equal(resolveRole('bob@relay.test'), 'customer');
-  assert.equal(resolveRole('hacker@admin.com'), 'customer');
+    // Configured environment grants staff role
+    process.env.RELAY_SUPPORT_EMAILS = 'support@relay.test,charlie@relay.support';
+    assert.equal(resolveRole('support@relay.test'), 'support');
+    assert.equal(resolveRole('charlie@relay.support'), 'support');
+
+    // Standard customer default
+    assert.equal(resolveRole('customer@example.com'), 'customer');
+    assert.equal(resolveRole('alice@relay.test'), 'customer');
+    assert.equal(resolveRole('bob@relay.test'), 'customer');
+    assert.equal(resolveRole('hacker@admin.com'), 'customer');
+  } finally {
+    if (original !== undefined) process.env.RELAY_SUPPORT_EMAILS = original;
+    else delete process.env.RELAY_SUPPORT_EMAILS;
+  }
 });
 
 test('S4-05 publicCase strips internalNotes strictly for customer role and exposes it for staff', () => {

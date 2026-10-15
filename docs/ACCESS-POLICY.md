@@ -20,7 +20,12 @@ Identity comes exclusively from the Sites authenticated user ID. Email is displa
 
 Customer-reported resolution is independent from support handling status. Assignment must not transfer ownership. A support user retains normal customer rights to their own cases but does not gain customer rights to other cases.
 
-## Server contracts and tests for implementation
+## Support Access Decision & Scope Alignment (S4 / S5 Implementation)
+
+- **Triage and Queue Discovery**: Support operators require queue visibility (`GET /api/cases?scope=queue`) to monitor incoming unassigned cases, filter by status/category, and triage urgent issues. Operators can inspect unassigned cases to determine the proper tier and assign a technician (`assignedTo`).
+- **Internal Notes Confidentiality**: `internalNotes` are reserved exclusively for staff records. Server-side DTO filtering (`publicCase`) completely strips `internalNotes` from customer payloads, and client export functions (`exportCase`) explicitly omit `internalNotes` from JSON downloads.
+- **Permanent Purge Barrier**: Support operators are prohibited from deleting customer cases (enforced via 403 Forbidden). Case deletion is strictly reserved for the case owner (customer hard-purge) and system administrators.
+- **Resolution Decoupling**: Staff changing case status to `resolved` or `closed` does NOT touch `verifiedAt`. `verifiedAt` remains strictly reserved for customer confirmation.
 
 - Keep `/api/cases` owner-scoped. Use separate `/api/support` endpoints, server queries, and payload types. Explicit allowlists prevent internal notes from reaching customer list/detail/export responses.
 - Query authorization with the row, including assignment, rather than trusting a prior UI check. Recheck every request; revoked grants and expired sessions take effect on the next request.

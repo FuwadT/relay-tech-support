@@ -389,8 +389,11 @@ export default function TechSupportApp({ displayName }: { displayName: string })
     if (!selected) return;
     const analysis = caseAnalysis(selected);
     const comparisons = compareMeasurements(selected.category, selected.measurements);
+    const exportRecord = { ...selected };
+    // Explicitly guarantee internalNotes is omitted from all exported JSON summaries
+    delete exportRecord.internalNotes;
     const payload = {
-      ...selected,
+      ...exportRecord,
       analysis,
       comparisons,
       ruleVersion: analysis.ruleVersion ?? DIAGNOSTIC_RULE_VERSION,

@@ -28,8 +28,9 @@ const CALLBACK_PATH = "/callback";
  * Client cookies, client-supplied role headers, and query parameters are NEVER trusted.
  */
 export function resolveRole(email: string): UserRole {
-  const isProduction = process.env.NODE_ENV === 'production';
-  const staffConfig = process.env.RELAY_SUPPORT_EMAILS ?? (isProduction ? '' : 'support@relay.test,charlie@relay.support');
+  // Authoritative server-controlled allowlist.
+  // Defaults strictly to an empty allowlist unless explicitly configured via RELAY_SUPPORT_EMAILS.
+  const staffConfig = process.env.RELAY_SUPPORT_EMAILS ?? '';
   const staffList = staffConfig.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
   const normalizedEmail = email.trim().toLowerCase();
 
