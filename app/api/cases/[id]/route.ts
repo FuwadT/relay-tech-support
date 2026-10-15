@@ -11,8 +11,8 @@ export async function GET(_request: Request, context: Context) {
 export async function PATCH(request: Request, context: Context) {
   const user=await getChatGPTUser(); if(!user) return Response.json({error:'Sign in to update this case.'},{status:401});
   try {
-    assertMutationRequest(request); const {id}=await context.params; const db=getDb(); const [row]=await db.select().from(cases).where(ownedCase(id,user.userId)).limit(1); if(!row)return Response.json({error:'Case not found.'},{status:404});
-    const patch=validatePatch(await readJson(request),row.category); const now=new Date().toISOString();
+    const body=await readJson(request); assertMutationRequest(request); const {id}=await context.params; const db=getDb(); const [row]=await db.select().from(cases).where(ownedCase(id,user.userId)).limit(1); if(!row)return Response.json({error:'Case not found.'},{status:404});
+    const patch=validatePatch(body,row.category); const now=new Date().toISOString();
     const updates={...patch,answers:{...row.answers,...patch.answers},updatedAt:now,verifiedAt:patch.status==='resolved'?now:patch.status?null:row.verifiedAt};
     const [updated]=await db.update(cases).set(updates).where(ownedCase(id,user.userId)).returning(); if(!updated)return Response.json({error:'Case not found.'},{status:404}); return Response.json({case:publicCase(updated)});
   } catch(error){return apiError(error);}
