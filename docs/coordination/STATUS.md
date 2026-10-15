@@ -7,8 +7,8 @@ Codex worktree: `C:/Users/fuwad/Relay-codex`, branch `codex/verification`, creat
 ## Immediate state
 
 - The user confirms Gemini and Codex are both working here. Concurrent edits have overwritten API changes and replaced node_modules during verification. Pause shared-checkout implementation until separate worktrees are established.
-- Local commit `86e0167`: Windows pnpm installer, shell line-ending policy, portable backend test runner. No GitHub remote is configured; GitHub CLI is signed out; the GitHub connector lists zero accessible repositories. This commit is local, not pushed.
-- Local commits `0d72695` and `20235c5`: coordination protocol/locks and reproducible runtime verification evidence. GitHub CLI device authorization has been requested from the user; private repository creation and push are pending that authorization.
+- GitHub: https://github.com/FuwadT/relay-tech-support — PRIVATE. User completed CLI authorization. Remote `origin` is configured and `main` through `2d3ef35` was pushed and verified by matching remote/local SHAs.
+- Commits `86e0167`, `0d72695`, `20235c5`, `2d3ef35` contain Windows setup, coordination/locks, runtime evidence, and worktree status. All are pushed. Uncommitted application/S4 changes are not included.
 - Codex verified 20 unit tests, TypeScript, production build, 35 HTTP assertions and a browser save/reload journey **before** the latest Gemini S4 changes. Those results do not validate the current combined checkout.
 - Current S4 authentication accepts browser-controlled identity/role. Release blocked. See TO-GEMINI.md.
 - Hosted Site remains owner-private. Do not change its audience or publish the current work.
