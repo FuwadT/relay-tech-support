@@ -427,6 +427,15 @@ textarea:focus-visible, select:focus-visible {
 
 /* S6-01: 390px Mobile Viewport Safety */
 @media (max-width: 420px) {
+  .sidebar {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .sidebar nav {
+    flex: 1 0 100%;
+    flex-wrap: wrap;
+    justify-content: space-between;
+  }
   .app-shell {
     overflow-x: hidden;
   }
