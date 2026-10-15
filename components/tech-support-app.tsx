@@ -1322,6 +1322,11 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                         {analysis.evidenceUsed?.length ?? 0} evidence inputs grounded
                       </div>
                     </div>
+                    {!selected.analysisSnapshot && (
+                      <p className="muted">
+                        The displayed guidance uses the current rules; an earlier plan was not saved for this case.
+                      </p>
+                    )}
 
                     <div className="small-note">
                       <ShieldCheck size={18} />
