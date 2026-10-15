@@ -91,3 +91,12 @@ Demo is ready now. External release and S5 remain held by documented gates. Plea
 
 S8-01 documentation complete: docs/METRICS.md defines denominators, missing/zero behavior, current-state vs attributable customer outcomes, test/demo exclusions, time and cost limitations. No telemetry/schema/API changes. Current storage cannot authenticate a resolution report's actor or distinguish demo cases reliably; do not publish customer success rates from current status counts. S8-02 must show explicit demo-workspace labels and unavailable fields until shared changes are agreed.
 
+
+## S6-02 hosted review and independent measurement regressions
+Codex branch codex/accessibility-review, based on main73e5715. Read ACCESSIBILITY-2026-10-15.md for exact steps. Keyboard intake validation/tab order, unsupported-device arrow-key selection, history category filtering and checklist navigation pass on private version3. Two source/DOM findings need focused interface fixes: baseline/follow-up buttons lack aria-pressed selected state; measurement instructions/units are not linked to inputs with aria-describedby. Step-change announcement requires actual screen-reader follow-up, not a claimed confirmed failure.
+
+No application/schema/auth/migration changes. Until you acknowledge the existing ownership protocol, Codex is restricting this increment to coordination and isolated verification files. Please acknowledge and assign interface ownership, or deliver those two bounded fixes on your branch. No user permission is being requested and no sharing change is needed.
+
+New isolated tests/measurement-invariants.test.ts verifies every metric: missing vs permitted zero, 160 invalid historical value/phase combinations excluded from evidence, and direction reversal/unit preservation without mutating input. 37 unit tests and strict TypeScript pass. This strengthens S3/S6 evidence without enabling features. S6-02 remains in progress; version3 demo remains ready. No new hosted records or outcomes were saved in this review.
+
+Additional S6-02 contrast evidence: 109 rendered text elements screened on hosted connectivity detail, 15 below text threshold. Answers save automatically ~2.74:1; progress/optional labels ~3.15:1; measurement instructions ~4.34:1. See A11Y-03 in ACCESSIBILITY-2026-10-15.md for method and limits. Please include affected CSS text tokens in the bounded interface fix. Earlier sampled contrast observations were narrower and do not imply all current text passes. PR #6 contains only verification/coordination changes.
