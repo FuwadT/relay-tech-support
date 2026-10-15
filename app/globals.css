@@ -28,7 +28,7 @@ main{max-width:1280px;padding-top:36px}.eyebrow{color:#777169;font-size:10px;let
 .hero{min-height:0;align-items:center;justify-content:space-between;background:#fff;color:#242424;border:1px solid #d7d3cb;border-top:3px solid #a44526;border-radius:4px;margin-bottom:24px;overflow:visible;gap:30px}
 .hero-copy{width:auto;flex:1;padding:28px 30px}.hero h2{font-size:25px;margin:0;line-height:1.3;letter-spacing:-.5px}.hero .eyebrow{font-size:10px;color:#827568;margin:0 0 10px}.hero p:not(.eyebrow){font-size:14px;line-height:1.65;color:#66615b;max-width:440px;margin:10px 0 20px}
 .support-scope{width:275px;flex-shrink:0;padding:2px 28px;border-left:1px solid #dedbd5}.scope-caption{font-family:monospace;font-size:10px;letter-spacing:.5px;color:#777169}.support-scope>div{display:flex;gap:12px;align-items:center;margin-top:18px;font-size:12px}.support-scope svg{color:#8a6550}.support-scope p{font-size:11px!important;color:#7d776e!important;margin:19px 0 0!important}
-.stats{gap:0;border:1px solid #dcdad5;border-radius:4px;background:transparent}.stats>div{border:0;border-right:1px solid #dcdad5;border-radius:0;background:transparent;padding:17px 24px}.stats>div:last-child{border-right:0}.stat-icon,.stat-icon.amber,.stat-icon.green{background:transparent;color:#78736a;padding:0}.stats small{font-size:11px;color:#6e6961}.stats strong{font-size:25px;font-weight:500;font-variant-numeric:tabular-nums}
+.stats{gap:0;border:1px solid #dcdad5;border-radius:4px;background:transparent}.stats>div{border:0;border-right:1px solid #dcdad5;border-radius:0;background:transparent;padding:17px 24px}.stats>div:last-child{border-right:0}.stat-icon,.stat-icon.amber,.stat-icon.green{background:transparent;color:#54504a;padding:0}.stats small{font-size:11px;color:#6e6961}.stats strong{font-size:25px;font-weight:500;font-variant-numeric:tabular-nums}
 .category-grid{gap:0;border-top:1px solid #d7d3cb;border-bottom:1px solid #d7d3cb}.category-card{background:transparent;border:0;border-radius:0;padding:24px}.category-card:first-child{border-right:1px solid #d7d3cb}.category-card:hover{background:#ece9e3;transform:none}.category-card h3{font-size:16px}.category-card p{font-size:13px}.category-card .device-icon{background:transparent;color:#665e52;width:30px;height:30px;border-radius:0}.text-link{color:#824026;font-size:12px}.section-heading h2{font-size:18px}.section-heading>span{font-size:11px}
 .device-icon,.device-icon.blue{background:#eeebe5;color:#6a6358;border-radius:4px}.case-list,.panel,.empty{border-radius:4px}.case-list{border-color:#d7d3cb}.case-row:hover{background:#f8f6f1}.case-main strong{font-size:13px}.case-main>span{font-size:11px;color:#756e64}.status{border-radius:3px}.case-date{color:#756e64}.empty{border-style:solid;background:#faf9f6;color:#817567}.empty h3{color:#3d3934}.empty p{font-size:13px}
 input,select,textarea{border-radius:4px;color:#292724;border-color:#d3cec5;font-size:14px}input::placeholder,textarea::placeholder{color:#8e877c;font-size:13px}.search{border-radius:4px}.panel{border-color:#ddd8ce}.category-options button,.answer-options button{border-radius:4px;border-color:#d8d2c8}.category-options button.selected,.answer-options button.selected{background:#f2ece1;border-color:#9e7657;color:#403527}.checkbox input{accent-color:#824026}.checkbox span{color:#6f675c}.intake small{color:#787063}.next-line>span{background:#e7dfd2;color:#685440;border-radius:3px}.small-note,.reason{background:#f2efe8;color:#736758;border-radius:4px}.small-note p{color:#70675c;font-size:11px}.check-tabs button{border-radius:4px;background:#eee9df;color:#756b5c}.check-tabs button.selected{background:#38332d;color:#fff}.report li{font-size:13px;color:#665f54}.report>p,.check-content>p{font-size:13px}.muted{color:#776d60;font-size:11px}.back{color:#766450}.workspace-footer{font-size:11px;color:#7d7469}
@@ -404,21 +404,15 @@ input,select,textarea{border-radius:4px;color:#292724;border-color:#d3cec5;font-
 }
 .metric-caption {
   font-size: 11px;
-  color: #78736a;
+  color: #54504a;
   margin-top: 6px;
   line-height: 1.4;
 }
 .metric-disabled-desc {
   font-size: 11px;
-  color: #888277;
+  color: #54504a;
   line-height: 1.5;
   margin-top: 4px;
-}
-
-/* S5 AI Technical Assessment Panel */
-.ai-assessment-panel {
-  border-top: 3px solid #8a6550;
-  background: #fdfcfb;
 }
 
 /* S6-01: 390px Mobile Viewport Safety */

@@ -32,8 +32,6 @@ import {
   X,
 } from 'lucide-react';
 import type {
-  AIExplanation,
-  Analysis,
   Answers,
   CaseMeasurements,
   CaseRecord,
@@ -43,6 +41,8 @@ import type {
   UserProfile,
 } from '@/lib/contracts';
 import { canAccessQueue } from '@/lib/contracts';
+import { intakeDraftKey, parseIntakeDraft, makeIntakeSubmission, type IntakeSubmission } from '@/lib/intake-draft';
+import { summarizeWorkspaceMetrics } from '@/lib/workspace-metrics';
 import {
   DIAGNOSTIC_RULE_VERSION,
   caseAnalysis,
@@ -99,8 +99,6 @@ export default function TechSupportApp({ displayName }: { displayName: string })
   const [selected, setSelected] = useState<CaseRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [aiBusy, setAiBusy] = useState(false);
-  const [aiRemaining, setAiRemaining] = useState<number | null>(null);
   const [draftRestored, setDraftRestored] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -129,48 +127,80 @@ export default function TechSupportApp({ displayName }: { displayName: string })
 
   const generation = useRef(0);
   const previousView = useRef<'cases' | 'queue' | 'metrics'>('cases');
-  const idempotencyKeyRef = useRef<string>(
-    typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `relay-key-${Date.now()}`
-  );
+  const [submission, setSubmission] = useState<IntakeSubmission | null>(null);
+  const submissionRef = useRef<IntakeSubmission | null>(null);
+  const ownerRef = useRef<string | null>(null);
+  const [draftOwnerId, setDraftOwnerId] = useState<string | null>(null);
+  const [draftWarning, setDraftWarning] = useState('');
+  const [draftBlocked, setDraftBlocked] = useState(false);
+  const [dataReady, setDataReady] = useState(false);
+  const [dataAsOf, setDataAsOf] = useState<string | null>(null);
+  const [queueReady, setQueueReady] = useState(false);
+  const [queueAsOf, setQueueAsOf] = useState<string | null>(null);
 
   function cancelDelete() {
     restoreDeleteFocus.current = true;
     setDeleteOpen(false);
   }
 
-  // Restore intake draft on initial mount
   useEffect(() => {
-    try {
-      const saved = typeof window !== 'undefined' ? sessionStorage.getItem('relay_intake_draft') : null;
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed === 'object' && (parsed.title || parsed.description || parsed.deviceName)) {
-          setForm((prev) => ({ ...prev, ...parsed }));
-          setDraftRestored(true);
-        }
-      }
-    } catch {}
-  }, []);
-
-  // Autosave intake draft to sessionStorage
-  useEffect(() => {
-    if (view === 'new') {
-      try {
-        if (typeof window !== 'undefined') {
-          if (form.title || form.description || form.deviceName) {
-            sessionStorage.setItem('relay_intake_draft', JSON.stringify(form));
-          }
-        }
-      } catch {}
-    }
-  }, [form, view]);
-
-  function discardDraft() {
+    const owner = currentUser?.userId;
+    ownerRef.current = owner ?? null;
+    submissionRef.current = null;
+    setSubmission(null);
     setForm(initial);
     setDraftRestored(false);
+    setDraftBlocked(false);
+    setDraftWarning('');
+    setDraftOwnerId(null);
+    if (!owner) return;
     try {
-      if (typeof window !== 'undefined') sessionStorage.removeItem('relay_intake_draft');
-    } catch {}
+      const raw = sessionStorage.getItem(intakeDraftKey(owner));
+      const saved = parseIntakeDraft(raw, owner);
+      if (saved) {
+        setForm(saved.submission?.payload ?? saved.form);
+        submissionRef.current = saved.submission;
+        setSubmission(saved.submission);
+        setDraftRestored(true);
+      } else if (raw !== null) {
+        setDraftBlocked(true);
+        setDraftWarning('This saved draft could not be restored safely. Discard it explicitly before starting a new attempt; an earlier save may exist in My cases.');
+      }
+    } catch {
+      setDraftWarning('Browser storage is unavailable. Drafts and retry keys stay in this tab only; keep it open until a save is confirmed.');
+    }
+    setDraftOwnerId(owner);
+  }, [currentUser?.userId]);
+
+  function persistDraft(nextForm: IntakeInput, nextSubmission: IntakeSubmission | null) {
+    const owner = ownerRef.current;
+    if (!owner) return;
+    try {
+      if (!nextSubmission && !nextForm.title && !nextForm.description && !nextForm.deviceName) {
+        sessionStorage.removeItem(intakeDraftKey(owner));
+      } else {
+        sessionStorage.setItem(intakeDraftKey(owner), JSON.stringify({ version: 1, ownerId: owner, form: nextForm, submission: nextSubmission }));
+      }
+    } catch {
+      setDraftWarning('Browser storage is unavailable. Drafts and retry keys stay in this tab only; keep it open until a save is confirmed.');
+    }
+  }
+
+  useEffect(() => {
+    if (view === 'new' && currentUser?.userId === draftOwnerId && !draftBlocked) {
+      persistDraft(form, submission);
+    }
+  }, [form, submission, view, draftOwnerId, currentUser?.userId, draftBlocked]);
+
+  function discardDraft() {
+    if (busy) return;
+    submissionRef.current = null;
+    setSubmission(null);
+    setForm(initial);
+    setDraftRestored(false);
+    setDraftBlocked(false);
+    persistDraft(initial, null);
+    setNotice('Draft discarded. Check My cases for any earlier uncertain save before deliberately creating another case.');
   }
 
   useEffect(() => {
@@ -182,20 +212,32 @@ export default function TechSupportApp({ displayName }: { displayName: string })
 
   useEffect(() => {
     let mounted = true;
+    setDataReady(false);
+    setQueueReady(false);
+    setLoading(true);
+    setCases([]);
+    setQueueCases([]);
     async function loadInitial() {
       try {
         const authData = await request<{ user: UserProfile }>('/api/auth/me');
         if (!mounted) return;
         setCurrentUser(authData.user);
+        setSelected(null);
+        setView('overview');
+        generation.current++;
 
         const casesData = await request<{ cases: CaseRecord[] }>('/api/cases');
         if (!mounted) return;
         setCases(casesData.cases);
+        setDataReady(true);
+        setDataAsOf(new Date().toISOString());
 
         if (canAccessQueue(authData.user.role)) {
           const qData = await request<{ cases: CaseRecord[] }>('/api/cases?scope=queue');
           if (!mounted) return;
           setQueueCases(qData.cases);
+          setQueueReady(true);
+          setQueueAsOf(new Date().toISOString());
         }
       } catch (e) {
         if (!mounted) return;
@@ -212,9 +254,12 @@ export default function TechSupportApp({ displayName }: { displayName: string })
 
   async function loadQueue() {
     setQueueLoading(true);
+    setQueueReady(false);
     try {
       const d = await request<{ cases: CaseRecord[] }>('/api/cases?scope=queue');
       setQueueCases(d.cases);
+      setQueueReady(true);
+      setQueueAsOf(new Date().toISOString());
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -233,22 +278,10 @@ export default function TechSupportApp({ displayName }: { displayName: string })
     }
   }
 
-  function start(c: Category = 'performance') {
-    let draftLoaded = false;
-    try {
-      const saved = typeof window !== 'undefined' ? sessionStorage.getItem('relay_intake_draft') : null;
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed === 'object' && (parsed.title || parsed.description || parsed.deviceName)) {
-          setForm((prev) => ({ ...prev, ...parsed, category: c }));
-          setDraftRestored(true);
-          draftLoaded = true;
-        }
-      }
-    } catch {}
-    if (!draftLoaded) {
-      setForm({ ...initial, category: c });
-      setDraftRestored(false);
+  function start(c?: Category) {
+    if (busy) return;
+    if (!submissionRef.current && !form.title && !form.description && !form.deviceName && !draftRestored) {
+      setForm({ ...initial, category: c ?? 'performance' });
     }
     navigate('new');
   }
@@ -279,80 +312,50 @@ export default function TechSupportApp({ displayName }: { displayName: string })
   }
 
   function updateRecord(c: CaseRecord) {
+    setDataAsOf(new Date().toISOString());
+    setQueueAsOf(new Date().toISOString());
     setCases((old) => [c, ...old.filter((x) => x.id !== c.id)].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
     setQueueCases((old) => [c, ...old.filter((x) => x.id !== c.id)].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
   }
 
-  async function create(e: React.FormEvent) {
-    e.preventDefault();
-    if (busy) return;
+  async function create(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (busy || !currentUser || draftOwnerId !== currentUser.userId || draftBlocked) return;
+    const owner = currentUser.userId;
     setBusy(true);
     setError('');
     const g = generation.current;
+    let attempt: IntakeSubmission;
     try {
+      attempt = submissionRef.current ?? makeIntakeSubmission(form);
+      submissionRef.current = attempt;
+      setSubmission(attempt);
+      persistDraft(attempt.payload, attempt);
       const d = await request<{ case: CaseRecord }>('/api/cases', {
-        method: 'POST',
-        headers: {
-          'Idempotency-Key': idempotencyKeyRef.current,
-        },
-        body: JSON.stringify(form),
+        method: 'POST', headers: { 'Idempotency-Key': attempt.key }, body: JSON.stringify(attempt.payload),
       });
-      // Reset idempotency key and clear saved draft on definitive success
-      idempotencyKeyRef.current =
-        typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `relay-key-${Date.now()}`;
-      try {
-        if (typeof window !== 'undefined') sessionStorage.removeItem('relay_intake_draft');
-      } catch {}
-      setDraftRestored(false);
+      if (!d.case?.id) throw new Error('The save response could not be confirmed. Retry this same attempt.');
+      if (ownerRef.current !== owner || submissionRef.current !== attempt) return;
       updateRecord(d.case);
+      submissionRef.current = null;
+      setSubmission(null);
+      setForm(initial);
+      persistDraft(initial, null);
+      setDraftRestored(false);
       if (g !== generation.current) return;
       setSelected(d.case);
-      setNotes('');
-      setStaffNotes('');
+      setNotes(d.case.notes);
+      setStaffNotes(d.case.internalNotes ?? '');
       setStaffStatus(d.case.status);
-      setStaffAssignedTo('');
+      setStaffAssignedTo(d.case.assignedTo ?? '');
       setStep(0);
       syncMeasurementInputs(d.case);
       previousView.current = 'cases';
       navigate('detail');
     } catch (e) {
-      if (g === generation.current) setError((e as Error).message);
+      if (g === generation.current && ownerRef.current === owner) setError((e as Error).message);
     } finally {
       setBusy(false);
-    }
-  }
-
-  async function requestAIExplanation() {
-    if (!selected || busy || aiBusy) return;
-    setAiBusy(true);
-    setError('');
-    setNotice('');
-    const g = generation.current;
-    try {
-      const res = await request<{
-        explanation: AIExplanation;
-        analysis: Analysis;
-        remaining: number;
-      }>(`/api/cases/${selected.id}/ai-explain`, {
-        method: 'POST',
-        body: JSON.stringify({}),
-      });
-      if (g === generation.current) {
-        setAiRemaining(res.remaining);
-        const updatedCase: CaseRecord = {
-          ...selected,
-          analysisSnapshot: res.analysis,
-        };
-        setSelected(updatedCase);
-        updateRecord(updatedCase);
-        setNotice('AI Technical Assessment generated and saved.');
-      }
-    } catch (e) {
-      if (g === generation.current) {
-        setError((e as Error).message);
-      }
-    } finally {
-      setAiBusy(false);
     }
   }
 
@@ -462,7 +465,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
       setQueueCases((old) => old.filter((c) => c.id !== id));
       if (g === generation.current) {
         setSelected(null);
-        setNotice('Case deleted from active database. Prior backups are retained in accordance with our data retention schedule.');
+        setNotice('Case deleted from the active database. Existing backups may retain older copies; minimal retry metadata is retained to prevent recreation by an old request.');
         navigate(previousView.current === 'queue' && canAccessQueue(currentUser?.role ?? 'customer') ? 'queue' : 'cases');
       }
     } catch (e) {
@@ -1037,210 +1040,40 @@ export default function TechSupportApp({ displayName }: { displayName: string })
             </>
           )}
 
-          {/* VIEW: OPERATIONAL METRICS (Task S8-02) */}
           {view === 'metrics' && (() => {
-            const cohort = isStaff ? queueCases : cases;
-            const cohortCount = cohort.length;
-
-            const checklistCompletedCount = cohort.filter((c) => {
-              const chks = getChecks(c.category);
-              return chks.every((chk) => {
-                const val = c.answers?.[chk.id];
-                return val !== undefined && val !== '';
-              });
-            }).length;
-
-            let totalPossibleChecks = 0;
-            let usableObservationsCount = 0;
-            for (const c of cohort) {
-              const chks = getChecks(c.category);
-              totalPossibleChecks += chks.length;
-              for (const chk of chks) {
-                const val = c.answers?.[chk.id];
-                if (val && !['unknown', 'not_tried'].includes(val)) {
-                  usableObservationsCount++;
-                }
-              }
-            }
-
-            const resolvedCount = cohort.filter((c) => c.status === 'resolved').length;
-            const escalatedCount = cohort.filter((c) => c.status === 'escalated').length;
-
-            let eligibleMetricPairs = 0;
-            let improvedMetricPairs = 0;
-            for (const c of cohort) {
-              const comps = compareMeasurements(c.category, c.measurements);
-              for (const comp of comps) {
-                if (comp.direction !== 'incomplete') {
-                  eligibleMetricPairs++;
-                  if (comp.direction === 'improved') {
-                    improvedMetricPairs++;
-                  }
-                }
-              }
-            }
-
-            return (
-              <>
-                <button className="back" onClick={() => navigate('overview')}>
-                  <ArrowLeft size={16} />
-                  Back to overview
-                </button>
-                <div className="page-heading">
-                  <div>
-                    <p className="eyebrow">OPERATIONAL VISIBILITY &amp; GOVERNANCE (S8-02)</p>
-                    <h1>Operational Metrics</h1>
-                    <p>Standardized diagnostic reporting across retained cases, adhering strictly to S8-01 contract definitions.</p>
-                  </div>
-                </div>
-
-                {/* S8-01 Demo Workspace Banner */}
-                <div className="demo-metrics-banner" role="status" aria-live="polite">
-                  <AlertTriangle size={20} style={{ flexShrink: 0, marginTop: 2 }} />
-                  <div>
-                    <strong>Demo workspace — synthetic cases; not customer results</strong>
-                    <p>
-                      Metrics are derived solely from currently retained records in this workspace. External customer rates, lifetime completion, and cohort outcomes remain unavailable until authoritative server-controlled population accounting is agreed.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="metrics-grid">
-                  <div className="metric-card">
-                    <div className="metric-card-header">
-                      <ClipboardList size={16} />
-                      <span>Retained Cohort Cases</span>
-                    </div>
-                    <strong className="metric-value">{cohortCount}</strong>
-                    <small className="metric-caption">Distinct retained records in {isStaff ? 'queue' : 'personal workspace'}</small>
-                  </div>
-
-                  <div className="metric-card">
-                    <div className="metric-card-header">
-                      <CheckCircle2 size={16} />
-                      <span>Guided Checklist Completion</span>
-                    </div>
-                    <strong className="metric-value">
-                      {cohortCount > 0 ? `${checklistCompletedCount} / ${cohortCount}` : 'No eligible records'}
-                    </strong>
-                    <small className="metric-caption">
-                      {cohortCount > 0
-                        ? `${((checklistCompletedCount / cohortCount) * 100).toFixed(1)}% answered all approved checks`
-                        : 'No retained cases'}
-                    </small>
-                  </div>
-
-                  <div className="metric-card">
-                    <div className="metric-card-header">
-                      <Activity size={16} />
-                      <span>Usable Observation Coverage</span>
-                    </div>
-                    <strong className="metric-value">
-                      {totalPossibleChecks > 0 ? `${usableObservationsCount} / ${totalPossibleChecks}` : 'No eligible records'}
-                    </strong>
-                    <small className="metric-caption">
-                      {totalPossibleChecks > 0
-                        ? `${((usableObservationsCount / totalPossibleChecks) * 100).toFixed(1)}% checks with actionable observations`
-                        : 'No checks evaluated'}
-                    </small>
-                  </div>
-
-                  <div className="metric-card">
-                    <div className="metric-card-header">
-                      <Check size={16} />
-                      <span>Currently Marked Resolved</span>
-                    </div>
-                    <strong className="metric-value">
-                      {cohortCount > 0 ? `${resolvedCount} / ${cohortCount}` : 'No eligible records'}
-                    </strong>
-                    <small className="metric-caption">
-                      {cohortCount > 0
-                        ? `${((resolvedCount / cohortCount) * 100).toFixed(1)}% current status snapshot`
-                        : 'No retained cases'}
-                    </small>
-                  </div>
-
-                  <div className="metric-card">
-                    <div className="metric-card-header">
-                      <ShieldAlert size={16} />
-                      <span>Currently Escalated</span>
-                    </div>
-                    <strong className="metric-value">
-                      {cohortCount > 0 ? `${escalatedCount} / ${cohortCount}` : 'No eligible records'}
-                    </strong>
-                    <small className="metric-caption">
-                      {cohortCount > 0
-                        ? `${((escalatedCount / cohortCount) * 100).toFixed(1)}% marked needs technician`
-                        : 'No retained cases'}
-                    </small>
-                  </div>
-
-                  <div className="metric-card">
-                    <div className="metric-card-header">
-                      <BarChart3 size={16} />
-                      <span>Measured Improvement</span>
-                    </div>
-                    <strong className="metric-value">
-                      {eligibleMetricPairs > 0 ? `${improvedMetricPairs} / ${eligibleMetricPairs}` : 'No eligible records'}
-                    </strong>
-                    <small className="metric-caption">
-                      {eligibleMetricPairs > 0
-                        ? `${((improvedMetricPairs / eligibleMetricPairs) * 100).toFixed(1)}% (${eligibleMetricPairs} eligible before/after pairs)`
-                        : 'No comparable measurement pairs'}
-                    </small>
-                  </div>
-                </div>
-
-                <div className="section-heading" style={{ marginTop: 32, marginBottom: 14 }}>
-                  <h2 style={{ fontSize: 16 }}>Controlled &amp; Future Capabilities (S8-01 Limitations)</h2>
-                </div>
-                <div className="metrics-grid">
-                  <div className="metric-card disabled">
-                    <div className="metric-card-header">
-                      <Clock size={16} />
-                      <span>Customer-Reported Resolution Rate</span>
-                      <span className="badge badge-incomplete">Unavailable</span>
-                    </div>
-                    <p className="metric-disabled-desc">
-                      Unavailable today: Status and verification timestamps lack actor/event history. Current storage cannot authenticate whether a resolution report came from customer verification or staff triage.
-                    </p>
-                  </div>
-
-                  <div className="metric-card disabled">
-                    <div className="metric-card-header">
-                      <Clock size={16} />
-                      <span>Active Handling Time</span>
-                      <span className="badge badge-incomplete">Unavailable</span>
-                    </div>
-                    <p className="metric-disabled-desc">
-                      Unavailable today: Active support duration is not recorded. Calendar elapsed duration between creation and update does not establish labor savings.
-                    </p>
-                  </div>
-
-                  <div className="metric-card disabled">
-                    <div className="metric-card-header">
-                      <Sparkles size={16} />
-                      <span>AI Request Cost Accounting</span>
-                      <span className="badge badge-unchanged">Not Enabled</span>
-                    </div>
-                    <p className="metric-disabled-desc">
-                      Not enabled: Billable token accounting and provider ledger records are disabled in this build. Zero-dollar fabrication is explicitly avoided.
-                    </p>
-                  </div>
-
-                  <div className="metric-card disabled">
-                    <div className="metric-card-header">
-                      <CreditCard size={16} />
-                      <span>Assisted-Service Receipts</span>
-                      <span className="badge badge-unchanged">Not Enabled</span>
-                    </div>
-                    <p className="metric-disabled-desc">
-                      Not enabled: Payment processing and receipts ledger are not enabled for this preview.
-                    </p>
-                  </div>
-                </div>
-              </>
-            );
+            const ready = isStaff ? queueReady : dataReady;
+            const pending = loading || (isStaff && queueLoading);
+            if (pending) return <p role="status">Loading workspace metrics…</p>;
+            if (!ready) return <div className="empty" role="status"><h1>Metrics unavailable</h1><p>The workspace records could not be loaded. Reload to try again; an unknown population is not zero cases.</p></div>;
+            const cohort = (isStaff ? queueCases : cases).slice(0, 200);
+            const summary = summarizeWorkspaceMetrics(cohort);
+            const ratio = (count: number, total: number) => total ? `${count} / ${total} (${(100 * count / total).toFixed(1)}%)` : 'No eligible records';
+            return <>
+              <div className="page-heading"><div><p className="eyebrow">RETAINED RECORD SNAPSHOT</p><h1>Workspace metrics</h1></div></div>
+              <div className="alert" role="note"><strong>Demo workspace — synthetic cases; not customer results.</strong></div>
+              <p>Scope: {isStaff ? 'authorized support queue' : 'your signed-in owner workspace'}. Sample: up to 200 most recently updated loaded records; older records may be omitted. Creation window: all dates represented in this sample. Snapshot collected: {isStaff ? queueAsOf : dataAsOf} (UTC), with confirmed local updates included.</p>
+              <p>These are current retained records, not lifetime rates. Deleted cases are absent. Historical customer/test classification and attributable customer reports are unavailable.</p>
+              <div className="metrics-grid">
+                <div className="metric-card"><h2>Loaded retained cases</h2><strong className="metric-value">{summary.caseCount}</strong></div>
+                <div className="metric-card"><h2>Guided checklist completion</h2><strong>{summary.coverageAvailable ? ratio(summary.completedCases, summary.caseCount) : 'Unavailable — historical check vocabulary not verified'}</strong><p>Recognized answers count, including offered unknown/not-tried. This is not repair success.</p></div>
+                <div className="metric-card"><h2>Usable observation coverage</h2><strong>{summary.coverageAvailable ? ratio(summary.usableChecks, summary.totalChecks) : 'Unavailable — historical check vocabulary not verified'}</strong><p>Unknown, not-tried and invalid answers provide no usable observations.</p></div>
+                <div className="metric-card"><h2>Currently marked resolved</h2><strong>{ratio(summary.resolvedCases, summary.caseCount)}</strong><p>Current status does not establish who reported it or verify a repair.</p></div>
+                <div className="metric-card"><h2>Currently escalated</h2><strong>{ratio(summary.escalatedCases, summary.caseCount)}</strong><p>A recorded next step does not contact a technician.</p></div>
+              </div>
+              <h2>Self-reported comparisons, by metric</h2>
+              <p>Each metric has its own valid-pair denominator. Improvement does not establish causation or resolution.</p>
+              <div className="metrics-grid">{summary.metrics.map(metric => <div className="metric-card" key={metric.id}>
+                <h3>{metric.label} ({metric.unit})</h3><p>{categoryLabel(metric.category)}</p>
+                <strong>Improved: {ratio(metric.improved, metric.pairs)}</strong>
+                <p>Comparable-pair coverage: {ratio(metric.pairs, summary.caseCount)} of loaded cases.</p>
+              </div>)}</div>
+              <div className="metrics-grid">
+                <div className="metric-card disabled"><h3>Customer-reported resolution</h3><p className="metric-disabled-desc">Unavailable: attributable report history is not recorded.</p></div>
+                <div className="metric-card disabled"><h3>Active handling time</h3><p className="metric-disabled-desc">Unavailable: active time is not recorded. Creation-to-update duration is not time spent.</p></div>
+                <div className="metric-card disabled"><h3>AI request cost</h3><p className="metric-disabled-desc">Not enabled. No provider calls or billing records are available.</p></div>
+                <div className="metric-card disabled"><h3>Paid-service receipts</h3><p className="metric-disabled-desc">Not enabled. Payments and refunds are not implemented.</p></div>
+              </div>
+            </>;
           })()}
 
           {/* VIEW: NEW CASE */}
@@ -1259,21 +1092,11 @@ export default function TechSupportApp({ displayName }: { displayName: string })
               </div>
               <div className="intake-grid">
                 <form className="panel intake" onSubmit={create}>
-                  {draftRestored && (
-                    <div className="alert success" role="status" aria-live="polite" style={{ marginBottom: 18 }}>
-                      <Clock size={16} />
-                      <span>Restored unfinished draft from your current browser session.</span>
-                      <button
-                        type="button"
-                        className="button secondary compact"
-                        style={{ marginLeft: 'auto' }}
-                        onClick={discardDraft}
-                      >
-                        Discard draft
-                      </button>
-                    </div>
-                  )}
-                  <fieldset disabled={busy}>
+                  {draftRestored && <p role="status">Restored your unfinished draft from this browser tab.</p>}
+                  {draftWarning && <p role="status">{draftWarning}</p>}
+                  {submission && <div className="alert" role="status"><p>An earlier save may have succeeded. Retry the same saved request to recover its case; the submitted details are locked.</p><button type="button" className="button secondary" disabled={busy} onClick={() => void create()}>Retry same save</button></div>}
+                  {(draftRestored || submission || draftBlocked) && <button type="button" className="button secondary" disabled={busy} onClick={discardDraft}>Discard draft and start a new attempt</button>}
+                  <fieldset disabled={busy || !!submission || draftBlocked || !currentUser || draftOwnerId !== currentUser.userId}>
                     <legend className="field-title">What needs attention?</legend>
                     <div className="category-options">
                       {(['performance', 'network'] as Category[]).map((c) => (
@@ -1668,95 +1491,6 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                       <p className="muted">
                         The displayed guidance uses the current rules; an earlier plan was not saved for this case.
                       </p>
-                    )}
-
-                    {/* S5: AI Technical Assessment Card or Request Button */}
-                    {analysis.aiExplanation ? (
-                      <div className="panel ai-assessment-panel" style={{ marginTop: 20 }}>
-                        <div className="section-heading" style={{ marginBottom: 10 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <Sparkles size={17} style={{ color: '#8a6550' }} />
-                            <h3 style={{ margin: 0, fontSize: 15 }}>AI Technical Assessment</h3>
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span
-                              className={`badge ${
-                                analysis.aiExplanation.provider === 'openai' ? 'badge-improved' : 'badge-unchanged'
-                              }`}
-                            >
-                              {analysis.aiExplanation.provider === 'openai'
-                                ? 'OpenAI Technical Analysis'
-                                : 'Diagnostic Fallback'}
-                            </span>
-                            <span className="muted" style={{ fontSize: 10, margin: 0 }}>
-                              {analysis.aiExplanation.latencyMs}ms
-                            </span>
-                          </div>
-                        </div>
-
-                        <p style={{ fontSize: 13, lineHeight: 1.6, color: '#3d3a36', marginBottom: 12 }}>
-                          {analysis.aiExplanation.summary}
-                        </p>
-
-                        <div style={{ marginBottom: 12 }}>
-                          <strong style={{ display: 'block', fontSize: 12, marginBottom: 5, color: '#3b3834' }}>
-                            Likely Technical Root Causes:
-                          </strong>
-                          <ul style={{ paddingLeft: 18, margin: 0 }}>
-                            {analysis.aiExplanation.likelyCauses.map((c, i) => (
-                              <li key={i} style={{ fontSize: 12, color: '#57524b', lineHeight: 1.6 }}>
-                                {c}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-
-                        {analysis.aiExplanation.recommendedCheckIds.length > 0 && (
-                          <div style={{ marginBottom: 12 }}>
-                            <strong style={{ display: 'block', fontSize: 12, marginBottom: 5, color: '#3b3834' }}>
-                              Recommended Diagnostic Focus:
-                            </strong>
-                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                              {analysis.aiExplanation.recommendedCheckIds.map((cid) => (
-                                <span key={cid} className="badge badge-unchanged" style={{ textTransform: 'none' }}>
-                                  Check: {cid}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {analysis.aiExplanation.cautions.length > 0 && (
-                          <div className="small-note" style={{ marginTop: 10, padding: 10 }}>
-                            <ShieldCheck size={16} />
-                            <div>
-                              <strong style={{ display: 'block', fontSize: 11, marginBottom: 2 }}>
-                                Safety Cautions:
-                              </strong>
-                              {analysis.aiExplanation.cautions.map((caution, i) => (
-                                <p key={i} style={{ margin: '2px 0', fontSize: 11 }}>
-                                  {caution}
-                                </p>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                        <button
-                          type="button"
-                          className="button secondary compact"
-                          disabled={busy || aiBusy}
-                          onClick={() => void requestAIExplanation()}
-                        >
-                          {aiBusy ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />}
-                          Generate AI technical assessment
-                        </button>
-                        <span className="muted" style={{ margin: 0, fontSize: 11 }}>
-                          {aiRemaining !== null ? `${aiRemaining} remaining for this case` : 'Grounded conservatively in recorded observations'}
-                        </span>
-                      </div>
                     )}
 
                     <div className="small-note">
