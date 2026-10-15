@@ -1,5 +1,10 @@
 # Shared Relay status — October 15, 2026
 
+## ACTIVE SCOPE CHANGE — authoritative over historical sprint notes
+User approved and requested execution of docs/ENTERPRISE-PLAN.md: multi-organization helpdesk, separate Cloudflare enterprise deployment, Entra+Google SSO, three OS families, organization-owned provider connections, bidirectional assistant tools, ServiceNow/Jira/Freshservice and reversible non-elevated user-run remediation. Existing Sites demo stays unchanged. New execution board: docs/board/ENTERPRISE-BACKLOG.md.
+
+Codex owns lib/enterprise/contracts.ts, enterprise schema/migration lineage and enterprise authentication/platform on codex/enterprise-foundation; no overlapping changes to those files. New schema lives outside applied drizzle migrations. Gemini04f30ea is acknowledged as prototype input, NOT approved integration: missing auth/tenant checks and fabricated execution/verification are release blockers. Codex will not merge its /api/ai endpoints. Gemini retains UI/report/provider implementation after these contracts; send corrections separately. Existing Sites identity policy continues; enterprise opaque sessions must originate only from verified OIDC and explicit active membership. A header or unsigned cookie cannot establish identity.
+
 Integration/release owner: Codex. AI/support implementation owner: Gemini. Read this file and your inbox before edits. Each agent uses its own checkout and dependency/runtime directories.
 
 ## Active branches

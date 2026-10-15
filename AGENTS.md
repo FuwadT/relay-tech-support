@@ -20,7 +20,7 @@ Read `docs/coordination/STATUS.md` and your inbox before editing. Gemini and Cod
 
 ## Non-negotiable auth boundary
 
-Only Sites-verified identity is authoritative. Never accept identity or roles from browser cookies, query parameters, `x-relay-role`, email conventions, or role-switch endpoints. Support grants must be server-controlled. Local test personas must be confined to test infrastructure and absent from deployable application code. Customer payloads and exports must exclude internal notes.
+The existing Sites deployment trusts only Sites-verified identity. The user-approved enterprise scope uses a separate Cloudflare deployment and database: verified Entra/Google OIDC identities establish opaque server-side sessions; validated active organization memberships determine roles. Never infer identity or roles from unverified cookies, query parameters, `x-relay-role`, email conventions, or role-switch endpoints. Do not accept Sites identity headers on the standalone enterprise Worker. Support grants must be server-controlled. Local test personas must be confined to test infrastructure and absent from deployable application code. Customer payloads and exports must exclude internal notes.
 
 ## Local workstation
 
