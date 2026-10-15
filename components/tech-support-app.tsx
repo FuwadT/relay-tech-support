@@ -1,15 +1,20 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import {
+  Activity,
+  AlertTriangle,
   ArrowDownToLine,
   ArrowLeft,
   ArrowRight,
+  BarChart3,
   Check,
   CheckCircle2,
   ChevronRight,
   CircleHelp,
   ClipboardList,
+  Clock,
   Cpu,
+  CreditCard,
   Inbox,
   LayoutDashboard,
   Loader2,
@@ -20,12 +25,15 @@ import {
   Search,
   ShieldAlert,
   ShieldCheck,
+  Sparkles,
   Trash2,
   User,
   Wifi,
   X,
 } from 'lucide-react';
 import type {
+  AIExplanation,
+  Analysis,
   Answers,
   CaseMeasurements,
   CaseRecord,
@@ -83,7 +91,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export default function TechSupportApp({ displayName }: { displayName: string }) {
-  const [view, setView] = useState<'overview' | 'cases' | 'new' | 'detail' | 'queue'>('overview');
+  const [view, setView] = useState<'overview' | 'cases' | 'new' | 'detail' | 'queue' | 'metrics'>('overview');
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [cases, setCases] = useState<CaseRecord[]>([]);
   const [queueCases, setQueueCases] = useState<CaseRecord[]>([]);
@@ -91,6 +99,9 @@ export default function TechSupportApp({ displayName }: { displayName: string })
   const [selected, setSelected] = useState<CaseRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiRemaining, setAiRemaining] = useState<number | null>(null);
+  const [draftRestored, setDraftRestored] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [form, setForm] = useState<IntakeInput>(initial);
@@ -117,11 +128,49 @@ export default function TechSupportApp({ displayName }: { displayName: string })
   const [queueStatus, setQueueStatus] = useState('all');
 
   const generation = useRef(0);
-  const previousView = useRef<'cases' | 'queue'>('cases');
+  const previousView = useRef<'cases' | 'queue' | 'metrics'>('cases');
+  const idempotencyKeyRef = useRef<string>(
+    typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `relay-key-${Date.now()}`
+  );
 
   function cancelDelete() {
     restoreDeleteFocus.current = true;
     setDeleteOpen(false);
+  }
+
+  // Restore intake draft on initial mount
+  useEffect(() => {
+    try {
+      const saved = typeof window !== 'undefined' ? sessionStorage.getItem('relay_intake_draft') : null;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object' && (parsed.title || parsed.description || parsed.deviceName)) {
+          setForm((prev) => ({ ...prev, ...parsed }));
+          setDraftRestored(true);
+        }
+      }
+    } catch {}
+  }, []);
+
+  // Autosave intake draft to sessionStorage
+  useEffect(() => {
+    if (view === 'new') {
+      try {
+        if (typeof window !== 'undefined') {
+          if (form.title || form.description || form.deviceName) {
+            sessionStorage.setItem('relay_intake_draft', JSON.stringify(form));
+          }
+        }
+      } catch {}
+    }
+  }, [form, view]);
+
+  function discardDraft() {
+    setForm(initial);
+    setDraftRestored(false);
+    try {
+      if (typeof window !== 'undefined') sessionStorage.removeItem('relay_intake_draft');
+    } catch {}
   }
 
   useEffect(() => {
@@ -173,8 +222,6 @@ export default function TechSupportApp({ displayName }: { displayName: string })
     }
   }
 
-
-
   function navigate(v: typeof view) {
     generation.current++;
     setView(v);
@@ -187,7 +234,22 @@ export default function TechSupportApp({ displayName }: { displayName: string })
   }
 
   function start(c: Category = 'performance') {
-    setForm({ ...initial, category: c });
+    let draftLoaded = false;
+    try {
+      const saved = typeof window !== 'undefined' ? sessionStorage.getItem('relay_intake_draft') : null;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object' && (parsed.title || parsed.description || parsed.deviceName)) {
+          setForm((prev) => ({ ...prev, ...parsed, category: c }));
+          setDraftRestored(true);
+          draftLoaded = true;
+        }
+      }
+    } catch {}
+    if (!draftLoaded) {
+      setForm({ ...initial, category: c });
+      setDraftRestored(false);
+    }
     navigate('new');
   }
 
@@ -228,7 +290,20 @@ export default function TechSupportApp({ displayName }: { displayName: string })
     setError('');
     const g = generation.current;
     try {
-      const d = await request<{ case: CaseRecord }>('/api/cases', { method: 'POST', body: JSON.stringify(form) });
+      const d = await request<{ case: CaseRecord }>('/api/cases', {
+        method: 'POST',
+        headers: {
+          'Idempotency-Key': idempotencyKeyRef.current,
+        },
+        body: JSON.stringify(form),
+      });
+      // Reset idempotency key and clear saved draft on definitive success
+      idempotencyKeyRef.current =
+        typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `relay-key-${Date.now()}`;
+      try {
+        if (typeof window !== 'undefined') sessionStorage.removeItem('relay_intake_draft');
+      } catch {}
+      setDraftRestored(false);
       updateRecord(d.case);
       if (g !== generation.current) return;
       setSelected(d.case);
@@ -244,6 +319,40 @@ export default function TechSupportApp({ displayName }: { displayName: string })
       if (g === generation.current) setError((e as Error).message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function requestAIExplanation() {
+    if (!selected || busy || aiBusy) return;
+    setAiBusy(true);
+    setError('');
+    setNotice('');
+    const g = generation.current;
+    try {
+      const res = await request<{
+        explanation: AIExplanation;
+        analysis: Analysis;
+        remaining: number;
+      }>(`/api/cases/${selected.id}/ai-explain`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      if (g === generation.current) {
+        setAiRemaining(res.remaining);
+        const updatedCase: CaseRecord = {
+          ...selected,
+          analysisSnapshot: res.analysis,
+        };
+        setSelected(updatedCase);
+        updateRecord(updatedCase);
+        setNotice('AI Technical Assessment generated and saved.');
+      }
+    } catch (e) {
+      if (g === generation.current) {
+        setError((e as Error).message);
+      }
+    } finally {
+      setAiBusy(false);
     }
   }
 
@@ -353,7 +462,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
       setQueueCases((old) => old.filter((c) => c.id !== id));
       if (g === generation.current) {
         setSelected(null);
-        setNotice('Case permanently purged in accordance with our data retention policy.');
+        setNotice('Case deleted from active database. Prior backups are retained in accordance with our data retention schedule.');
         navigate(previousView.current === 'queue' && canAccessQueue(currentUser?.role ?? 'customer') ? 'queue' : 'cases');
       }
     } catch (e) {
@@ -481,6 +590,14 @@ export default function TechSupportApp({ displayName }: { displayName: string })
             <ClipboardList size={19} />
             My cases<span className="nav-count">{cases.length}</span>
           </button>
+          <button
+            className={view === 'metrics' ? 'nav-item active' : 'nav-item'}
+            aria-current={view === 'metrics' ? 'page' : undefined}
+            onClick={() => navigate('metrics')}
+          >
+            <BarChart3 size={19} />
+            Metrics
+          </button>
           <button aria-current={view === 'new' ? 'page' : undefined} className={view === 'new' ? 'nav-item active' : 'nav-item'} onClick={() => start()}>
             <Plus size={19} />
             New case
@@ -514,6 +631,8 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                 ? 'New case'
                 : view === 'queue'
                 ? 'Support queue'
+                : view === 'metrics'
+                ? 'Operational metrics'
                 : view === 'cases'
                 ? 'My cases'
                 : 'Overview'}
@@ -918,6 +1037,212 @@ export default function TechSupportApp({ displayName }: { displayName: string })
             </>
           )}
 
+          {/* VIEW: OPERATIONAL METRICS (Task S8-02) */}
+          {view === 'metrics' && (() => {
+            const cohort = isStaff ? queueCases : cases;
+            const cohortCount = cohort.length;
+
+            const checklistCompletedCount = cohort.filter((c) => {
+              const chks = getChecks(c.category);
+              return chks.every((chk) => {
+                const val = c.answers?.[chk.id];
+                return val !== undefined && val !== '';
+              });
+            }).length;
+
+            let totalPossibleChecks = 0;
+            let usableObservationsCount = 0;
+            for (const c of cohort) {
+              const chks = getChecks(c.category);
+              totalPossibleChecks += chks.length;
+              for (const chk of chks) {
+                const val = c.answers?.[chk.id];
+                if (val && !['unknown', 'not_tried'].includes(val)) {
+                  usableObservationsCount++;
+                }
+              }
+            }
+
+            const resolvedCount = cohort.filter((c) => c.status === 'resolved').length;
+            const escalatedCount = cohort.filter((c) => c.status === 'escalated').length;
+
+            let eligibleMetricPairs = 0;
+            let improvedMetricPairs = 0;
+            for (const c of cohort) {
+              const comps = compareMeasurements(c.category, c.measurements);
+              for (const comp of comps) {
+                if (comp.direction !== 'incomplete') {
+                  eligibleMetricPairs++;
+                  if (comp.direction === 'improved') {
+                    improvedMetricPairs++;
+                  }
+                }
+              }
+            }
+
+            return (
+              <>
+                <button className="back" onClick={() => navigate('overview')}>
+                  <ArrowLeft size={16} />
+                  Back to overview
+                </button>
+                <div className="page-heading">
+                  <div>
+                    <p className="eyebrow">OPERATIONAL VISIBILITY &amp; GOVERNANCE (S8-02)</p>
+                    <h1>Operational Metrics</h1>
+                    <p>Standardized diagnostic reporting across retained cases, adhering strictly to S8-01 contract definitions.</p>
+                  </div>
+                </div>
+
+                {/* S8-01 Demo Workspace Banner */}
+                <div className="demo-metrics-banner" role="status" aria-live="polite">
+                  <AlertTriangle size={20} style={{ flexShrink: 0, marginTop: 2 }} />
+                  <div>
+                    <strong>Demo workspace — synthetic cases; not customer results</strong>
+                    <p>
+                      Metrics are derived solely from currently retained records in this workspace. External customer rates, lifetime completion, and cohort outcomes remain unavailable until authoritative server-controlled population accounting is agreed.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="metrics-grid">
+                  <div className="metric-card">
+                    <div className="metric-card-header">
+                      <ClipboardList size={16} />
+                      <span>Retained Cohort Cases</span>
+                    </div>
+                    <strong className="metric-value">{cohortCount}</strong>
+                    <small className="metric-caption">Distinct retained records in {isStaff ? 'queue' : 'personal workspace'}</small>
+                  </div>
+
+                  <div className="metric-card">
+                    <div className="metric-card-header">
+                      <CheckCircle2 size={16} />
+                      <span>Guided Checklist Completion</span>
+                    </div>
+                    <strong className="metric-value">
+                      {cohortCount > 0 ? `${checklistCompletedCount} / ${cohortCount}` : 'No eligible records'}
+                    </strong>
+                    <small className="metric-caption">
+                      {cohortCount > 0
+                        ? `${((checklistCompletedCount / cohortCount) * 100).toFixed(1)}% answered all approved checks`
+                        : 'No retained cases'}
+                    </small>
+                  </div>
+
+                  <div className="metric-card">
+                    <div className="metric-card-header">
+                      <Activity size={16} />
+                      <span>Usable Observation Coverage</span>
+                    </div>
+                    <strong className="metric-value">
+                      {totalPossibleChecks > 0 ? `${usableObservationsCount} / ${totalPossibleChecks}` : 'No eligible records'}
+                    </strong>
+                    <small className="metric-caption">
+                      {totalPossibleChecks > 0
+                        ? `${((usableObservationsCount / totalPossibleChecks) * 100).toFixed(1)}% checks with actionable observations`
+                        : 'No checks evaluated'}
+                    </small>
+                  </div>
+
+                  <div className="metric-card">
+                    <div className="metric-card-header">
+                      <Check size={16} />
+                      <span>Currently Marked Resolved</span>
+                    </div>
+                    <strong className="metric-value">
+                      {cohortCount > 0 ? `${resolvedCount} / ${cohortCount}` : 'No eligible records'}
+                    </strong>
+                    <small className="metric-caption">
+                      {cohortCount > 0
+                        ? `${((resolvedCount / cohortCount) * 100).toFixed(1)}% current status snapshot`
+                        : 'No retained cases'}
+                    </small>
+                  </div>
+
+                  <div className="metric-card">
+                    <div className="metric-card-header">
+                      <ShieldAlert size={16} />
+                      <span>Currently Escalated</span>
+                    </div>
+                    <strong className="metric-value">
+                      {cohortCount > 0 ? `${escalatedCount} / ${cohortCount}` : 'No eligible records'}
+                    </strong>
+                    <small className="metric-caption">
+                      {cohortCount > 0
+                        ? `${((escalatedCount / cohortCount) * 100).toFixed(1)}% marked needs technician`
+                        : 'No retained cases'}
+                    </small>
+                  </div>
+
+                  <div className="metric-card">
+                    <div className="metric-card-header">
+                      <BarChart3 size={16} />
+                      <span>Measured Improvement</span>
+                    </div>
+                    <strong className="metric-value">
+                      {eligibleMetricPairs > 0 ? `${improvedMetricPairs} / ${eligibleMetricPairs}` : 'No eligible records'}
+                    </strong>
+                    <small className="metric-caption">
+                      {eligibleMetricPairs > 0
+                        ? `${((improvedMetricPairs / eligibleMetricPairs) * 100).toFixed(1)}% (${eligibleMetricPairs} eligible before/after pairs)`
+                        : 'No comparable measurement pairs'}
+                    </small>
+                  </div>
+                </div>
+
+                <div className="section-heading" style={{ marginTop: 32, marginBottom: 14 }}>
+                  <h2 style={{ fontSize: 16 }}>Controlled &amp; Future Capabilities (S8-01 Limitations)</h2>
+                </div>
+                <div className="metrics-grid">
+                  <div className="metric-card disabled">
+                    <div className="metric-card-header">
+                      <Clock size={16} />
+                      <span>Customer-Reported Resolution Rate</span>
+                      <span className="badge badge-incomplete">Unavailable</span>
+                    </div>
+                    <p className="metric-disabled-desc">
+                      Unavailable today: Status and verification timestamps lack actor/event history. Current storage cannot authenticate whether a resolution report came from customer verification or staff triage.
+                    </p>
+                  </div>
+
+                  <div className="metric-card disabled">
+                    <div className="metric-card-header">
+                      <Clock size={16} />
+                      <span>Active Handling Time</span>
+                      <span className="badge badge-incomplete">Unavailable</span>
+                    </div>
+                    <p className="metric-disabled-desc">
+                      Unavailable today: Active support duration is not recorded. Calendar elapsed duration between creation and update does not establish labor savings.
+                    </p>
+                  </div>
+
+                  <div className="metric-card disabled">
+                    <div className="metric-card-header">
+                      <Sparkles size={16} />
+                      <span>AI Request Cost Accounting</span>
+                      <span className="badge badge-unchanged">Not Enabled</span>
+                    </div>
+                    <p className="metric-disabled-desc">
+                      Not enabled: Billable token accounting and provider ledger records are disabled in this build. Zero-dollar fabrication is explicitly avoided.
+                    </p>
+                  </div>
+
+                  <div className="metric-card disabled">
+                    <div className="metric-card-header">
+                      <CreditCard size={16} />
+                      <span>Assisted-Service Receipts</span>
+                      <span className="badge badge-unchanged">Not Enabled</span>
+                    </div>
+                    <p className="metric-disabled-desc">
+                      Not enabled: Payment processing and receipts ledger are not enabled for this preview.
+                    </p>
+                  </div>
+                </div>
+              </>
+            );
+          })()}
+
           {/* VIEW: NEW CASE */}
           {view === 'new' && (
             <>
@@ -934,6 +1259,20 @@ export default function TechSupportApp({ displayName }: { displayName: string })
               </div>
               <div className="intake-grid">
                 <form className="panel intake" onSubmit={create}>
+                  {draftRestored && (
+                    <div className="alert success" role="status" aria-live="polite" style={{ marginBottom: 18 }}>
+                      <Clock size={16} />
+                      <span>Restored unfinished draft from your current browser session.</span>
+                      <button
+                        type="button"
+                        className="button secondary compact"
+                        style={{ marginLeft: 'auto' }}
+                        onClick={discardDraft}
+                      >
+                        Discard draft
+                      </button>
+                    </div>
+                  )}
                   <fieldset disabled={busy}>
                     <legend className="field-title">What needs attention?</legend>
                     <div className="category-options">
@@ -1192,6 +1531,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                     <div className="category-options" style={{ marginTop: 14 }}>
                       <button
                         type="button"
+                        aria-pressed={activeMeasurementKind === 'baseline'}
                         className={activeMeasurementKind === 'baseline' ? 'selected' : ''}
                         onClick={() => setActiveMeasurementKind('baseline')}
                       >
@@ -1199,6 +1539,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                       </button>
                       <button
                         type="button"
+                        aria-pressed={activeMeasurementKind === 'followUp'}
                         className={activeMeasurementKind === 'followUp' ? 'selected' : ''}
                         onClick={() => setActiveMeasurementKind('followUp')}
                       >
@@ -1213,10 +1554,11 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                         return (
                           <div key={def.id} className="measurement-card">
                             <label htmlFor={`meas-${def.id}`}>{def.label}</label>
-                            <p className="measurement-instruction">{def.instruction}</p>
+                            <p id={`meas-desc-${def.id}`} className="measurement-instruction">{def.instruction}</p>
                             <div className="measurement-input-row">
                               <input
                                 id={`meas-${def.id}`}
+                                aria-describedby={`meas-desc-${def.id} meas-unit-${def.id}`}
                                 type="number"
                                 step="any"
                                 min={def.min}
@@ -1232,7 +1574,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                                   }
                                 }}
                               />
-                              <span className="measurement-unit">{def.unit}</span>
+                              <span id={`meas-unit-${def.id}`} className="measurement-unit">{def.unit}</span>
                             </div>
                           </div>
                         );
@@ -1326,6 +1668,95 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                       <p className="muted">
                         The displayed guidance uses the current rules; an earlier plan was not saved for this case.
                       </p>
+                    )}
+
+                    {/* S5: AI Technical Assessment Card or Request Button */}
+                    {analysis.aiExplanation ? (
+                      <div className="panel ai-assessment-panel" style={{ marginTop: 20 }}>
+                        <div className="section-heading" style={{ marginBottom: 10 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <Sparkles size={17} style={{ color: '#8a6550' }} />
+                            <h3 style={{ margin: 0, fontSize: 15 }}>AI Technical Assessment</h3>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span
+                              className={`badge ${
+                                analysis.aiExplanation.provider === 'openai' ? 'badge-improved' : 'badge-unchanged'
+                              }`}
+                            >
+                              {analysis.aiExplanation.provider === 'openai'
+                                ? 'OpenAI Technical Analysis'
+                                : 'Diagnostic Fallback'}
+                            </span>
+                            <span className="muted" style={{ fontSize: 10, margin: 0 }}>
+                              {analysis.aiExplanation.latencyMs}ms
+                            </span>
+                          </div>
+                        </div>
+
+                        <p style={{ fontSize: 13, lineHeight: 1.6, color: '#3d3a36', marginBottom: 12 }}>
+                          {analysis.aiExplanation.summary}
+                        </p>
+
+                        <div style={{ marginBottom: 12 }}>
+                          <strong style={{ display: 'block', fontSize: 12, marginBottom: 5, color: '#3b3834' }}>
+                            Likely Technical Root Causes:
+                          </strong>
+                          <ul style={{ paddingLeft: 18, margin: 0 }}>
+                            {analysis.aiExplanation.likelyCauses.map((c, i) => (
+                              <li key={i} style={{ fontSize: 12, color: '#57524b', lineHeight: 1.6 }}>
+                                {c}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+
+                        {analysis.aiExplanation.recommendedCheckIds.length > 0 && (
+                          <div style={{ marginBottom: 12 }}>
+                            <strong style={{ display: 'block', fontSize: 12, marginBottom: 5, color: '#3b3834' }}>
+                              Recommended Diagnostic Focus:
+                            </strong>
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                              {analysis.aiExplanation.recommendedCheckIds.map((cid) => (
+                                <span key={cid} className="badge badge-unchanged" style={{ textTransform: 'none' }}>
+                                  Check: {cid}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {analysis.aiExplanation.cautions.length > 0 && (
+                          <div className="small-note" style={{ marginTop: 10, padding: 10 }}>
+                            <ShieldCheck size={16} />
+                            <div>
+                              <strong style={{ display: 'block', fontSize: 11, marginBottom: 2 }}>
+                                Safety Cautions:
+                              </strong>
+                              {analysis.aiExplanation.cautions.map((caution, i) => (
+                                <p key={i} style={{ margin: '2px 0', fontSize: 11 }}>
+                                  {caution}
+                                </p>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          className="button secondary compact"
+                          disabled={busy || aiBusy}
+                          onClick={() => void requestAIExplanation()}
+                        >
+                          {aiBusy ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />}
+                          Generate AI technical assessment
+                        </button>
+                        <span className="muted" style={{ margin: 0, fontSize: 11 }}>
+                          {aiRemaining !== null ? `${aiRemaining} remaining for this case` : 'Grounded conservatively in recorded observations'}
+                        </span>
+                      </div>
                     )}
 
                     <div className="small-note">
