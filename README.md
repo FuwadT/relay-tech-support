@@ -1,36 +1,36 @@
-# Relay — private tech support MVP
+# Relay — guided support candidate
 
-Relay helps a signed-in owner record a Windows 11 performance or home-connectivity problem, follow guided checks, save observations, and review next steps. This is a private development release; it is not ready for customer rollout.
+Relay helps a signed-in owner record a personal Windows 11 slowdown or home-connectivity problem, follow four guided checks, and save observations and outcomes. This is a private development candidate, not an external customer release.
 
-## Implemented scope
+## Supported capabilities
 
-- Personal Windows 11 device intake with explicit consent.
-- Four structured checks per problem category and deterministic, evidence-based guidance.
-- Owner-scoped saved cases, notes, user-reported resolution/escalation, deletion and browser JSON export.
-- Server-side input validation, same-origin mutation checks and ChatGPT identity.
-- D1 database schema and checked-in Drizzle migration.
+- Personal Windows 11 intake, storage consent and unsupported-device handling.
+- Four manual checks per category, deterministic recommendations and saved answers including unknown/not-tried options.
+- Case history, notes, status, customer-reported resolution/escalation, JSON export and owner deletion.
+- Optional self-reported baseline/follow-up measurements, comparisons and saved diagnostic provenance.
+- Server validation, owner-scoped D1 persistence and platform identity. Support queue code requires an explicit server-side support grant; no test staff identities are granted by default. Customer access and staffed service operations are not enabled on the hosted prototype.
 
-No model is connected. The app does not scan devices, execute commands, remotely access a computer, or verify a repair. `verifiedAt` records when the user reports resolution; it is not independent verification. Support escalation is a saved status, not a message to a staffed service.
+This candidate has no live model adapter, AI explanation endpoint or AI assessment screen. AI work and its safety regressions remain separately under review on codex/integration (draft PR #2). Relay does not scan devices, run repairs, collect passwords, execute commands or verify a repair. verifiedAt records the customer's report; a staff handling status alone does not establish customer resolution. Escalation records a next step and does not contact a technician.
 
-## Development
+## Local development
 
-Source uses Vinext, React, TypeScript and Drizzle/D1. The Sites plugin owns build/publication and hosted authentication. `.openai/hosting.json` binds `DB`. Install and build through the Sites skill helpers. For standalone use, the package scripts provide `npm run dev`, `npm run build` and `npm run db:generate`.
+Use Node 24 and the packageManager-pinned pnpm 11.25.0 with the checked-in lockfile. On Windows use npm.cmd/pnpm.cmd when PowerShell blocks script shims. Each worktree owns its dependencies, generated output and local database.
 
-Use the existing `tests/` fixtures to validate rule branches, input bounds and owner SQL predicates. The integration handoff records the exact test command and results. Generated schema migrations are in `drizzle/`; publication applies hosted migrations. Do not edit applied migration history.
-
-## Before customer release
-
-Complete a real signed-in create/check/update/reload/delete journey, desktop and mobile browser QA, and two-identity authorization testing. Then add customer/support roles, service monitoring, retention procedures and verified recovery. Live AI, measured before/after outcomes, uploads and payments are future sprints. No payment or model credentials are configured.
-
-The current case list is limited to the 200 most recently updated records. Multi-device concurrent editing, pagination, duplicate-submission idempotency and production rate limits remain future work.
-
-## Verification in this build
-
-Backend review passed 13 automated checks; the generated migration also applied to fresh SQLite. Owner-predicate unit tests are not a substitute for hosted two-user API tests. Browser QA and a real hosted case round trip remain outstanding.
-
-Run the backend suite from the repository root:
-
-```sh
-node node_modules/typescript/bin/tsc --outDir /tmp/relay-backend-tests --module commonjs --target ES2022 --esModuleInterop --skipLibCheck tests/diagnostics.test.ts tests/backend-ownership.test.ts
-NODE_PATH="$PWD/node_modules" node --test /tmp/relay-backend-tests/tests/*.test.js
+```text
+pnpm install --frozen-lockfile
+npm test
+pnpm exec tsc --noEmit
+npm run build
 ```
+
+Sites skill helpers remain the supported hosting workflow. The existing .openai/hosting.json binds D1 as DB. Do not edit applied migrations or publish from an unreviewed checkout.
+
+For a fresh local D1 database, apply drizzle/*.sql in filename order using the built Worker config; for an existing database apply only migrations confirmed pending. See docs/RECOVERY.md. Start the built Worker with npm start -- --port 8789, then set RELAY_TEST_URL=http://127.0.0.1:8789 and run node tests/runtime.mjs. See docs/coordination/ACCESS-VERIFICATION.md for explicitly configured support checks and their limitations. npm run dev serves the development app separately.
+
+## Verification and release limits
+
+The guided-only source passes 34 tests and strict TypeScript. Current candidate build, runtime and browser evidence is recorded in docs/coordination/STATUS.md as it completes. Earlier integrated source passed both browser journeys, 66 local HTTP assertions and a disposable SQLite recovery rehearsal; those results are tied to their recorded commits.
+
+Hosted sign-in/session behavior, trusted-header stripping, two real customer identities and deployment-specific D1 restore remain release gates. Local identity fixtures do not verify hosted authentication. Existing backups may retain older records after active-database deletion; backup expiry and deletion replay are not configured. Do not promise erasure from every backup.
+
+Case lists show at most 200 records. Pagination, atomic multi-device edits, durable create idempotency, production request budgets, full accessibility review and production recovery remain unfinished. Uploads, payments, remote control and broader device support are outside this candidate. The currently hosted owner-private Site is an older release; no deployment is implied by a GitHub commit.

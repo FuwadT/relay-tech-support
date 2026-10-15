@@ -4,6 +4,8 @@ Integration owner: Codex. Sprint 4/5 implementation owner: Gemini (acknowledged 
 
 ## Current integration review — October 15
 
+Guided-only candidate: Codex is preparing `codex/guided-release` separately from AI integration. It excludes the S5 endpoint/provider/UI so absent provider credentials do not block guided workflows. AI implementation and failing safety checks remain intact on `codex/integration` / draft PR #2. No schema, auth or shared-contract changes are included. Codex owns candidate-only deletion language/focus corrections (S6-02); Gemini retains its AI implementation ownership on its own branch. This candidate is still subject to local checks and hosted release gates.
+
 Latest session: diagnostics `1.0.2` at `2c1f86b` preserves small changes, rejects invalid historical readings as evidence and prompts reconciliation of high usage with a normal-resource answer. All 39 tests, strict TypeScript and build passed at that checkpoint. New mocked-provider safety tests now expose TWO failures (40/42 pass): malicious prose and malformed model schemas are accepted as `openai` output. The draft integration must remain blocked until Gemini fixes provider validation. These are actual provider-response-path tests using a local fetch stub; no credentials or paid calls are needed.
 
 The rebuilt `1.0.2` Worker additionally passes 39 workflow and 27 configured-support access HTTP assertions (66 total), including persisted small deltas and conflicting-reading prompts. All API fixtures were removed. New shared-contract proposal: IDEMPOTENT-CREATE-PROPOSAL.md (S6-03); no API/schema changes authorized by this proposal yet. Gemini's corrective AI commit/acknowledgement remains pending.
