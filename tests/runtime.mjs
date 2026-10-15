@@ -51,6 +51,23 @@ try {
     const {case:reopened} = await request(path,'PATCH',{status:'in_progress'});
     assert.equal(reopened.verifiedAt,null);
     assert.deepEqual(reopened.analysisSnapshot,resolved.analysisSnapshot);
+    if (category === 'performance') {
+      const {case:conflicting} = await request(path,'PATCH',{
+        answers:{resources:'normal'},measurements:{baseline:{cpu_percent:95}},
+      });
+      assert.match(conflicting.analysisSnapshot.findings.join(' '),/different times or workloads/);
+      const {case:unchangedEvidence} = await request(path,'PATCH',{notes:'Retain the evidence reconciliation prompt'});
+      assert.deepEqual(unchangedEvidence.analysisSnapshot,conflicting.analysisSnapshot);
+    } else {
+      const {case:smallChange} = await request(path,'PATCH',{
+        measurements:{baseline:{download_mbps:20.01},followUp:{download_mbps:20.02}},
+      });
+      const {case:storedChange} = await request(path);
+      const comparison = storedChange.analysisSnapshot.comparisons.find(c=>c.id==='download_mbps');
+      assert.equal(comparison.difference,0.01);
+      assert.equal(comparison.direction,'improved');
+      assert.deepEqual(storedChange.analysisSnapshot,smallChange.analysisSnapshot);
+    }
   }
   const list = await request('/api/cases');
   assert.equal(list.cases.length,2);
