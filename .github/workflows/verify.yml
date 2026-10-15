@@ -24,11 +24,14 @@ jobs:
       - run: npm run build
       - name: Verify local Worker access boundaries
         shell: bash
+        env:
+          RELAY_TEST_URL: http://127.0.0.1:8789
+          RELAY_TEST_SUPPORT_EMAIL: operator@example.invalid
         run: |
           for migration in drizzle/*.sql; do
             node --import ./scripts/sites-env.mjs node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file "$migration"
           done
-          node --import ./scripts/sites-env.mjs node_modules/wrangler/bin/wrangler.js dev --local --config dist/server/wrangler.json --persist-to .wrangler/state --ip 127.0.0.1 --port 8789 --inspector-port 0 > /tmp/relay-worker.log 2>&1 &
+          node --import ./scripts/sites-env.mjs node_modules/wrangler/bin/wrangler.js dev --local --config dist/server/wrangler.json --persist-to .wrangler/state --ip 127.0.0.1 --port 8789 --inspector-port 0 --var RELAY_SUPPORT_EMAILS:operator@example.invalid > /tmp/relay-worker.log 2>&1 &
           worker_pid=$!
           trap 'kill "$worker_pid" 2>/dev/null || true' EXIT
           ready=false
@@ -41,3 +44,4 @@ jobs:
           done
           if [ "$ready" != true ]; then cat /tmp/relay-worker.log; exit 1; fi
           node tests/runtime-access.mjs
+          node tests/runtime.mjs
