@@ -2,7 +2,7 @@
 
 Working task: S8-03/S8-04 internal demo preparation and acceptance, alongside Sprint 6 reliability. This does not complete Sprint 8 or authorize an external customer release.
 
-The existing hosted version 2 is already usable for a guided workflow demo. The newer source adds optional before/after measurements, saved rule provenance and keyboard improvements. Initial estimate for preparing and verifying the updated owner-only hosted demo: 1–3 focused hours, subject to source packaging, hosted migrations and smoke checks. Update that estimate from observed results rather than treating it as a deadline.
+Hosted version 3 is ready for the owner-only guided workflow demo. See [release evidence](coordination/DEMO-RELEASE-2026-10-15.md). The newer source adds optional before/after measurements, saved rule provenance and keyboard improvements. The updated-demo acceptance checks passed on October 15; no additional development time is required for this scoped demonstration.
 
 ## Demo scope
 
@@ -29,7 +29,7 @@ Do not delete the existing hosted QA cases during the walkthrough without an int
 - Deployment succeeds, then the real owner creates, saves and reloads a case with measurements on the new version. Reopen one earlier case to check migration compatibility.
 - Mobile overflow and keyboard skip/deletion focus checks remain usable on the new hosted version.
 
-Until the final hosted checks pass, use the existing version 2 for the basic guided demo or the verified local build for the newer measurements. Do not describe the newest GitHub source as deployed.
+The scoped hosted checks now pass on version 3. If an older cached page appears immediately after publication, use the version-tagged URL in the release evidence. External customer acceptance remains separate.
 
 ## Remaining after an internal demo
 
