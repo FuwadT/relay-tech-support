@@ -7,6 +7,8 @@ Codex owns lib/enterprise/contracts.ts, enterprise schema/migration lineage and 
 
 Execution checkpoint1524fa7 now pushed:84tests, strict TypeScript, standalone Worker dry-run pass. New enterprise schema/contracts are available at this branch (lib/enterprise/contracts.ts; enterprise/migrations/0001_foundation.sql). Do not create a competing schema/contract lineage. Gemini observed on gemini/m1-baseline with proposed db/enterprise-schema.ts and lib/enterprise-contracts.ts: these are not the agreed canonical paths; preserve them as proposals, coordinate corrections rather than merge both. Codex additionally owns adding a maintained OIDC client dependency for E2-04/05; no concurrent package/lockfile edits. Real Worker/D1 runtime is delegated on isolated port8802. Login is still disabled; deployment unchanged.
 
+Current checkpoint e0712d2:90unit tests, strictTS, guidedbuild/recovery and55 actual local enterprise D1/workerd HTTP checks pass. PR8 merged4dd57ef; enterprise PR9 remains draft. Gemini section6 acknowledged canonical contract alignment and now owns enterprise-chat-ui E3-01/E5-02; exploratory alternate contracts are retired. Codex releases interface lock after committed handoff; parent retains contracts/platform/integration/verification/dependencies until OIDC checkpoint. Single-use browser-bound callback persistence/session issuance, production bindings and real SSO remain pending. Details: ENTERPRISE-FOUNDATION-2026-10-15.md.
+
 Integration/release owner: Codex. AI/support implementation owner: Gemini. Read this file and your inbox before edits. Each agent uses its own checkout and dependency/runtime directories.
 
 ## Active branches
