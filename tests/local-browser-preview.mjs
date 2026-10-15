@@ -17,6 +17,12 @@ http.createServer((incoming, outgoing) => {
     outgoing.writeHead(403).end('Local QA origin required.');
     return;
   }
+  if (process.env.RELAY_TEST_FAIL_CASE_LIST === '1' && incoming.method === 'GET' && incoming.url === '/api/cases') {
+    incoming.resume();
+    outgoing.writeHead(502, { 'Content-Type': 'application/json' })
+      .end(JSON.stringify({ error: 'Simulated unavailable case list.' }));
+    return;
+  }
   const headers = { ...incoming.headers, host: upstream.host,
     'oai-authenticated-user-id': fixtureId,
     'oai-authenticated-user-email': 'browser-fixture@example.invalid',

@@ -217,6 +217,14 @@ export default function TechSupportApp({ displayName }: { displayName: string })
 
   useEffect(() => {
     let mounted = true;
+    generation.current++;
+    ownerRef.current = null;
+    submissionRef.current = null;
+    setCurrentUser(null);
+    setSelected(null);
+    setDraftOwnerId(null);
+    setSubmission(null);
+    setForm(initial);
     setDataReady(false);
     setQueueReady(false);
     setLoading(true);
@@ -258,17 +266,20 @@ export default function TechSupportApp({ displayName }: { displayName: string })
   }, [displayName]);
 
   async function loadQueue() {
+    const owner = currentUser?.userId;
+    if (!owner) return;
     setQueueLoading(true);
     setQueueReady(false);
     try {
       const d = await request<{ cases: CaseRecord[] }>('/api/cases?scope=queue');
+      if (ownerRef.current !== owner) return;
       setQueueCases(d.cases);
       setQueueReady(true);
       setQueueAsOf(new Date().toISOString());
     } catch (e) {
-      setError((e as Error).message);
+      if (ownerRef.current === owner) setError((e as Error).message);
     } finally {
-      setQueueLoading(false);
+      if (ownerRef.current === owner) setQueueLoading(false);
     }
   }
 
