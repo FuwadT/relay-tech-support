@@ -29,6 +29,16 @@ try {
     const {case:initial} = await request('/api/cases','POST',{...intake,category},owner,201);
     created.push(initial.id);
     const path = `/api/cases/${initial.id}`;
+    if (process.env.RELAY_GUIDED_ONLY === '1') {
+      const unavailable = await fetch(`${base}${path}/ai-explain`, {method:'POST',
+        signal:AbortSignal.timeout(15000), headers:{
+          'Content-Type':'application/json', 'oai-authenticated-user-id':owner,
+          'oai-authenticated-user-email':'fixture@example.invalid',
+        }, body:'{}'});
+      await unavailable.text();
+      assert.equal(unavailable.status,404,'Guided-only candidate must not expose a model endpoint');
+      passed++;
+    }
     assert.equal('userId' in initial,false);
     assert.ok(initial.analysisSnapshot);
     assert.equal(initial.analysisSnapshot.ruleVersion,initial.ruleVersion);
@@ -51,6 +61,23 @@ try {
     const {case:reopened} = await request(path,'PATCH',{status:'in_progress'});
     assert.equal(reopened.verifiedAt,null);
     assert.deepEqual(reopened.analysisSnapshot,resolved.analysisSnapshot);
+    if (category === 'performance') {
+      const {case:conflicting} = await request(path,'PATCH',{
+        answers:{resources:'normal'},measurements:{baseline:{cpu_percent:95}},
+      });
+      assert.match(conflicting.analysisSnapshot.findings.join(' '),/different times or workloads/);
+      const {case:unchangedEvidence} = await request(path,'PATCH',{notes:'Retain the evidence reconciliation prompt'});
+      assert.deepEqual(unchangedEvidence.analysisSnapshot,conflicting.analysisSnapshot);
+    } else {
+      const {case:smallChange} = await request(path,'PATCH',{
+        measurements:{baseline:{download_mbps:20.01},followUp:{download_mbps:20.02}},
+      });
+      const {case:storedChange} = await request(path);
+      const comparison = storedChange.analysisSnapshot.comparisons.find(c=>c.id==='download_mbps');
+      assert.equal(comparison.difference,0.01);
+      assert.equal(comparison.direction,'improved');
+      assert.deepEqual(storedChange.analysisSnapshot,smallChange.analysisSnapshot);
+    }
   }
   const list = await request('/api/cases');
   assert.equal(list.cases.length,2);

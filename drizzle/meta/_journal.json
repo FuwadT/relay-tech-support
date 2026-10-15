@@ -8,6 +8,27 @@
       "when": 1791857630029,
       "tag": "0000_tranquil_ender_wiggin",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1792031341645,
+      "tag": "0001_add_measurements_and_provenance",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792031343251,
+      "tag": "0002_analysis_snapshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792031345000,
+      "tag": "0003_add_support_operations",
+      "breakpoints": true
     }
   ]
 }
