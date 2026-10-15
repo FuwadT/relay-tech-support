@@ -76,6 +76,33 @@ try {
   for (const result of concurrent) sameCase(result.data, concurrentId, result.status === 200);
   assert.deepEqual(await ids(), [first.case.id, concurrentId].sort(), 'Only one case per keyed attempt');
 
+  const competingKey = crypto.randomUUID();
+  const competingBodies = [
+    { ...intake, title: 'Concurrent attempt alpha', description: 'Synthetic observations from attempt alpha.' },
+    { ...intake, title: 'Concurrent attempt beta', description: 'Synthetic observations from attempt beta.' },
+  ];
+  const competing = await Promise.all(competingBodies.map(body => call({ key: competingKey, body })));
+  assert.deepEqual(competing.map(result => result.status).sort(), [201, 409], 'Conflicting concurrent submissions must have one winner');
+  const winningIndex = competing.findIndex(result => result.status === 201);
+  const winningCase = expect(competing[winningIndex], 201).case;
+  expect(competing[1 - winningIndex], 409);
+  const storedWinner = expect(await call({ method: 'GET', path: `/api/cases/${winningCase.id}` }), 200).case;
+  assert.equal(storedWinner.title, competingBodies[winningIndex].title);
+  assert.equal(storedWinner.description, competingBodies[winningIndex].description);
+  sameCase(expect(await call({ key: competingKey, body: competingBodies[winningIndex] }), 200), winningCase.id, true);
+  expect(await call({ key: competingKey, body: competingBodies[1 - winningIndex] }), 409);
+  assert.deepEqual(await ids(), [first.case.id, concurrentId, winningCase.id].sort(), 'Conflicting race must not leave a second stored case');
+
+  const updated = expect(await call({ method: 'PATCH', path: `/api/cases/${concurrentId}`, body: {
+    answers: { scope: 'whole_device', resources: 'normal' }, notes: 'Synthetic progress saved after initial creation.',
+  } }), 200).case;
+  assert.ok(updated.analysisSnapshot);
+  const afterProgressReplay = expect(await call({ key: concurrentKey }), 200);
+  sameCase(afterProgressReplay, concurrentId, true);
+  assert.deepEqual(afterProgressReplay.case, updated, 'Create replay must return current progress without restoring the initial case');
+  const afterReplayRead = expect(await call({ method: 'GET', path: `/api/cases/${concurrentId}` }), 200).case;
+  assert.deepEqual(afterReplayRead, updated, 'Replay must preserve persisted answers, notes and diagnostic snapshot');
+
   const malformedKey = crypto.randomUUID();
   expect(await call({ key: malformedKey, raw: '{broken' }), 400);
   const afterMalformed = expect(await call({ key: malformedKey }), 201);
