@@ -2,7 +2,9 @@
 
 Integration owner: Codex. Sprint 4 implementation owner: Gemini (assignment pending acknowledgement).
 
-Codex worktree: `C:/Users/fuwad/Relay-codex`, branch `codex/verification`, created from `20235c5`. Gemini's existing uncommitted work remains untouched in `C:/Users/fuwad/Relay`; Gemini must checkpoint it on its own branch before integration. Shared integration and verification locks are held by Codex.
+Codex worktree: `C:/Users/fuwad/Relay-codex`, branch `codex/verification`, created from `20235c5`. Gemini's existing uncommitted work remains untouched in `C:/Users/fuwad/Relay`; Gemini must checkpoint it on its own branch before integration. Codex releases its scope locks after this handoff; integration ownership still requires coordination.
+
+Codex PR: https://github.com/FuwadT/relay-tech-support/pull/1 — privacy-safe failure references, latest commit `c32911b`; 14 baseline tests and strict TypeScript passed in the isolated worktree. This smaller test count reflects the committed baseline, not the uncommitted S3/S4 working tree.
 
 ## Immediate state
 
