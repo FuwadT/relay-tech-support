@@ -46,3 +46,4 @@ jobs:
           if [ "$ready" != true ]; then cat /tmp/relay-worker.log; exit 1; fi
           node tests/runtime-access.mjs
           node tests/runtime.mjs
+          node tests/runtime-idempotency.mjs

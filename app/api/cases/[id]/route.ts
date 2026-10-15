@@ -25,7 +25,7 @@ export async function GET(request: Request, context: Context) {
       { headers: { 'Cache-Control': 'private, no-store' } }
     );
   } catch (error) {
-    return apiError(error);
+    return apiError(error, 'read_case');
   }
 }
 
@@ -154,7 +154,7 @@ export async function PATCH(request: Request, context: Context) {
       return Response.json({ case: publicCase(updated, user.role) });
     }
   } catch (error) {
-    return apiError(error);
+    return apiError(error, 'update_case');
   }
 }
 
@@ -183,9 +183,9 @@ export async function DELETE(request: Request, context: Context) {
     return Response.json({
       ok: true,
       deletedId: id,
-      policy: 'Customer-requested permanent purge complete.',
+      policy: 'The active case record was deleted. Existing backups may retain older copies.',
     });
   } catch (error) {
-    return apiError(error);
+    return apiError(error, 'delete_case');
   }
 }

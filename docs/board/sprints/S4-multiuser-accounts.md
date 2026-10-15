@@ -5,7 +5,7 @@
 **Goal**: Move beyond the single-owner prototype safely.
 
 ## Tasks
-☐ **[S4-01](../issues/S4-01.md)**: Design customer/support roles — 60 min. Define who may read, update, export, and delete a case.; Done when the permissions matrix includes denied operations. Depends on: S2-08.
+☑ **[S4-01](../issues/S4-01.md)**: Design customer/support roles — 60 min. Define who may read, update, export, and delete a case.; Done when the permissions matrix includes denied operations. Depends on: S2-08.
 ☐ **[S4-02](../issues/S4-02.md)**: Implement customer identity — 120 min. Extend the existing platform sign-in to the intended customer access model; retain owner-scoped server checks.; Done when sign-in, sign-out, and session expiry have clear behavior. Depends on: S4-01.
 ☐ **[S4-03](../issues/S4-03.md)**: Enforce server authorization — 120 min. Review the existing owner-scoped APIs and extend authorization for support roles using verified identity.; Done when one customer’s case ID cannot expose another customer’s data. Depends on: S4-02.
 ☐ **[S4-04](../issues/S4-04.md)**: Build the support queue — 90 min. Add authorized review, assignment, and case status filters.; Done when customer accounts cannot open the support queue. Depends on: S4-03.

@@ -6,6 +6,10 @@ Run `node scripts/verify-recovery.mjs` with Node 24 from the repository root. It
 
 The rehearsal also deletes the synthetic case and verifies that a newer backup omits it while the older backup retains it. That is a demonstrated limitation: restoring an old backup can resurrect data deleted since that backup. Production deletion replay and backup expiry are not implemented. Customer retention promises must account for this before customer access.
 
+Migration 0004 adds `case_create_requests`: minimal owner ID, key hash, normalized-payload hash, original case ID and creation timestamp. It stores no copy of case text or answers. This prototype does not expire these request records automatically: after the active case is deleted, its old key returns 410 rather than recreating it. Account-level metadata erasure and bounded retention still require a separate lifecycle design before external release. Never purge reservations as routine fixture cleanup or cascade-delete them with the case.
+
+The rehearsal checks every migration table against its snapshot and, when this table exists, verifies its reservation survives case deletion and the resulting backup. Restore must preserve reservations with cases. This prevents retry resurrection on the restored state; it does not solve replaying deletions that occurred after an older recovery point.
+
 ## Before a release migration
 
 1. Identify the deployed commit, target database, applied migration ledger and exact next migration files. Do not infer applied state from files in Git. Never rerun raw SQL against an existing database unless its applied state is known.
