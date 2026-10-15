@@ -46,7 +46,12 @@ export function createRequestBatch(db: DrizzleD1Database<typeof schema>, row: ty
     consentAt: sql`${row.consentAt}`.as('consentAt'), createdAt: sql`${row.createdAt}`.as('createdAt'),
     updatedAt: sql`${row.updatedAt}`.as('updatedAt'), verifiedAt: sql`${row.verifiedAt}`.as('verifiedAt'),
   }).from(caseCreateRequests).where(and(predicate, eq(caseCreateRequests.caseId, row.id))));
-  const lookup = db.select({ reservation: caseCreateRequests, case: cases })
+  // D1 batch returns object rows; Drizzle converts their values back to positions.
+  // Selecting both tables' created_at would collapse a duplicate object key and
+  // shift every later case field. Select only the uniquely named metadata needed.
+  const lookup = db.select({ reservation: {
+    payloadHash: caseCreateRequests.payloadHash, caseId: caseCreateRequests.caseId,
+  }, case: cases })
     .from(caseCreateRequests).leftJoin(cases, and(eq(cases.id, caseCreateRequests.caseId),
       eq(cases.userId, caseCreateRequests.ownerId))).where(predicate);
   return [reservation, insertion, lookup] as const;
