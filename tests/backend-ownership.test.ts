@@ -12,7 +12,7 @@ test('failure reference correlates logs without leaking database parameters',asy
   try {
     const response=apiError(new Error('SQL failed: private customer notes and email'));
     assert.equal(response.status,500);
-    const body=await response.json();
+    const body=await response.json() as {requestId:string; error:string};
     assert.equal(JSON.parse(logs[0]).requestId,body.requestId);
     assert.match(body.error,new RegExp(body.requestId));
     assert.doesNotMatch(logs.join(' ')+JSON.stringify(body),/private customer|SQL failed|email/);
