@@ -8,6 +8,8 @@ export function publicCase(row: typeof cases.$inferSelect): CaseRecord {
 }
 export function apiError(error: unknown): Response {
   if(error instanceof InputError) return Response.json({error:error.message},{status:400});
-  console.error('Case operation failed',error instanceof Error ? error.name : 'UnknownError');
-  return Response.json({error:'Unable to save or load cases. Please try again.'},{status:500});
+  const requestId = crypto.randomUUID();
+  // Do not log database error text: it may contain customer SQL parameters.
+  console.error(JSON.stringify({event:'case_operation_failed',requestId}));
+  return Response.json({error:`Unable to save or load cases. Please try again. Reference: ${requestId}`,requestId},{status:500});
 }
