@@ -38,4 +38,3 @@ PR #4 merged at 6dd00e4; CI 38786728384 passed. Sites version 3 deployed success
 
 
 S8-01 is complete as documentation: docs/METRICS.md specifies all requested metric denominators, unknowns, coverage and worked examples. Dashboard S8-02 remains pending. The internal demo needs no further development time; customer pilot readiness has no defensible date until identity, reliability and recovery gates pass. Next three tasks: S6-02 full keyboard review; shared agreement and implementation of S6-03; S8-02 labeled owner-workspace metrics. No payment/model enablement is included.
-

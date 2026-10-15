@@ -34,4 +34,3 @@ The scoped hosted checks now pass on version 3. If an older cached page appears 
 ## Remaining after an internal demo
 
 External pilot gates include two real identities and hosted trust-header/session checks, durable duplicate-create protection, full accessibility review, D1 recovery/backup expiry/deletion replay and any staffed support commitments. Live AI remains separately blocked by provider-output safety and durable usage controls. S6-03 requires the shared idempotency proposal to be agreed before API/schema edits.
-
