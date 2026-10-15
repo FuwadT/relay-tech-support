@@ -27,6 +27,7 @@ jobs:
         env:
           RELAY_TEST_URL: http://127.0.0.1:8789
           RELAY_TEST_SUPPORT_EMAIL: operator@example.invalid
+          RELAY_GUIDED_ONLY: '1'
         run: |
           for migration in drizzle/*.sql; do
             node --import ./scripts/sites-env.mjs node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file "$migration"

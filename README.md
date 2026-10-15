@@ -10,7 +10,7 @@ Relay helps a signed-in owner record a personal Windows 11 slowdown or home-conn
 - Optional self-reported baseline/follow-up measurements, comparisons and saved diagnostic provenance.
 - Server validation, owner-scoped D1 persistence and platform identity. Support queue code requires an explicit server-side support grant; no test staff identities are granted by default. Customer access and staffed service operations are not enabled on the hosted prototype.
 
-This candidate has no live model adapter, AI explanation endpoint or AI assessment screen. AI work and its safety regressions remain separately under review on codex/integration (draft PR #2). Relay does not scan devices, run repairs, collect passwords, execute commands or verify a repair. verifiedAt records the customer's report; a staff handling status alone does not establish customer resolution. Escalation records a next step and does not contact a technician.
+This candidate has no live model adapter or AI assessment screen. Explanation requests from stale clients receive a controlled unsupported-capability response; no model is called. AI work and its safety regressions remain separately under review on codex/integration (draft PR #2). Relay does not scan devices, run repairs, collect passwords, execute commands or verify a repair. verifiedAt records the customer's report; a staff handling status alone does not establish customer resolution. Escalation records a next step and does not contact a technician.
 
 ## Local development
 

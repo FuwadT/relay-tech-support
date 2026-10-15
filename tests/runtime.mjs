@@ -29,6 +29,16 @@ try {
     const {case:initial} = await request('/api/cases','POST',{...intake,category},owner,201);
     created.push(initial.id);
     const path = `/api/cases/${initial.id}`;
+    if (process.env.RELAY_GUIDED_ONLY === '1') {
+      const unavailable = await fetch(`${base}${path}/ai-explain`, {method:'POST',
+        signal:AbortSignal.timeout(15000), headers:{
+          'Content-Type':'application/json', 'oai-authenticated-user-id':owner,
+          'oai-authenticated-user-email':'fixture@example.invalid',
+        }, body:'{}'});
+      await unavailable.text();
+      assert.equal(unavailable.status,404,'Guided-only candidate must not expose a model endpoint');
+      passed++;
+    }
     assert.equal('userId' in initial,false);
     assert.ok(initial.analysisSnapshot);
     assert.equal(initial.analysisSnapshot.ruleVersion,initial.ruleVersion);
