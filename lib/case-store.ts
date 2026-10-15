@@ -35,10 +35,17 @@ export function publicCase(row: typeof cases.$inferSelect, role: UserRole = 'cus
   return result;
 }
 
-export function apiError(error: unknown): Response {
+const operations = ['list_cases', 'create_case', 'read_case', 'update_case', 'delete_case', 'ai_explanation', 'unknown'] as const;
+export type CaseOperation = typeof operations[number];
+
+export function apiError(error: unknown, operation: CaseOperation = 'unknown'): Response {
   if (error instanceof InputError) return Response.json({ error: error.message }, { status: 400 });
   const requestId = crypto.randomUUID();
   // Do not log database error text: it may contain customer SQL parameters.
-  console.error(JSON.stringify({ event: 'case_operation_failed', requestId }));
+  const safeOperation = operations.includes(operation) ? operation : 'unknown';
+  const failureType = error instanceof TypeError ? 'type_error'
+    : error instanceof RangeError ? 'range_error'
+    : error instanceof SyntaxError ? 'syntax_error' : 'unexpected_error';
+  console.error(JSON.stringify({ event: 'case_operation_failed', requestId, operation: safeOperation, failureType }));
   return Response.json({ error: `Unable to save or load cases. Please try again. Reference: ${requestId}`, requestId }, { status: 500 });
 }
