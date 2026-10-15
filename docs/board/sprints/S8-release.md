@@ -1,11 +1,11 @@
 # Sprint 8 — Release and next-sprint decisions
 
-**Status**: Not started  
+**Status**: In progress (internal demo and metrics definitions; external release gates remain open)  
 **Budget**: Approximately 10 hours (600 minutes)  
 **Goal**: Deliver a reviewable release and identify the next valuable improvements.
 
 ## Tasks
-☐ **[S8-01](../issues/S8-01.md)**: Define operational metrics — 60 min. Specify case completion, reported resolution, time spent, escalation, and cost definitions.; Done when each metric has a clear denominator. Depends on: S3-04.
+☑ **[S8-01](../issues/S8-01.md)**: Define operational metrics — 60 min. Specify case completion, reported resolution, time spent, escalation, and cost definitions.; Done when each metric has a clear denominator. Depends on: S3-04.
 ☐ **[S8-02](../issues/S8-02.md)**: Add a simple metrics view — 90 min. Display actual recorded metrics and empty states.; Done when demo data cannot be mistaken for customer results. Depends on: S8-01.
 ☐ **[S8-03](../issues/S8-03.md)**: Prepare release configuration — 90 min. Verify environment settings, permissions, migrations, and monitoring.; Done when secrets and test payment settings are checked. Depends on: S6-06.
 ☐ **[S8-04](../issues/S8-04.md)**: Run acceptance checks — 120 min. Verify all enabled capabilities on the release candidate.; Done when evidence links and known limitations are recorded. Depends on: S8-02, S8-03.
@@ -18,3 +18,4 @@ Released capabilities are verified, limitations are visible, and there is an own
 
 ---
 *Back to [Scrum Board](../BOARD.md)*
+
