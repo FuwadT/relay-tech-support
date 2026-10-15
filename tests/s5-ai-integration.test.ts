@@ -117,10 +117,16 @@ test('S5-04 graceful fallback handles invalid JSON, nulls, and provider errors',
   assert.equal(result.provider, 'deterministic-fallback');
   assert.ok(result.likelyCauses.length > 0);
   assert.ok(
-    result.recommendedCheckIds.includes('background_tasks') ||
+    result.recommendedCheckIds.includes('resources') ||
       result.recommendedCheckIds.includes('storage') ||
-      result.recommendedCheckIds.includes('startup_apps')
+      result.recommendedCheckIds.includes('scope') ||
+      result.recommendedCheckIds.includes('restart')
   );
+  // Verify that all returned check IDs are strictly valid approved check IDs
+  const validPerfCheckIds = getChecks('performance').map((c) => c.id);
+  for (const id of result.recommendedCheckIds) {
+    assert.ok(validPerfCheckIds.includes(id), `Unapproved check ID leaked in fallback: ${id}`);
+  }
 });
 
 test('S5-05 usage controls enforce per-case limits and cooldown periods', () => {
@@ -165,3 +171,25 @@ test('S5-06 prompt injection attempts in customer notes cannot compromise safety
     }
   }
 });
+
+test('S5-07 unsupported certainty claims fail closed to deterministic fallback', () => {
+  const overconfident = {
+    summary: 'The Wi-Fi card is 100% defective and this will definitely fix it.',
+    likelyCauses: ['This is the confirmed root cause.'],
+    recommendedCheckIds: ['connection'],
+    cautions: ['Do not relocate router.'],
+  };
+
+  const normalized = validateAndNormalizeAIResponse(
+    overconfident,
+    'network',
+    ['connection:better_near'],
+    'openai',
+    100
+  );
+
+  // Must fail closed to deterministic fallback
+  assert.equal(normalized.provider, 'deterministic-fallback');
+  assert.doesNotMatch(normalized.summary, /100%|definitely/i);
+});
+

@@ -5,7 +5,7 @@ import type {
   CaseMeasurements,
   Category,
 } from './contracts';
-import { getChecks } from './diagnostics';
+import { analyzeCase, getChecks, getMeasurementDefinitions } from './diagnostics';
 
 export interface GenerateAIExplanationOptions {
   caseId: string;
@@ -19,36 +19,29 @@ export interface GenerateAIExplanationOptions {
 
 /**
  * Extracts normalized evidence tokens from case answers and measurements.
+ * Rejects invalid historical readings and unrecognized answers by validating against
+ * canonical diagnostic rules (v1.0.2).
  */
 export function extractEvidenceTokens(
   answers: Answers,
-  measurements?: CaseMeasurements
+  measurements?: CaseMeasurements,
+  category?: Category
 ): string[] {
-  const tokens: string[] = [];
-
-  for (const [k, v] of Object.entries(answers)) {
-    if (v && !['unknown', 'not_tried'].includes(v)) {
-      tokens.push(`${k}:${v}`);
-    }
+  if (category) {
+    const analysis = analyzeCase({ category, answers, measurements });
+    return analysis.evidenceUsed;
   }
 
-  if (measurements?.baseline) {
-    for (const [k, v] of Object.entries(measurements.baseline)) {
-      if (typeof v === 'number' && Number.isFinite(v)) {
-        tokens.push(`baseline_${k}:${v}`);
-      }
-    }
-  }
-
-  if (measurements?.followUp) {
-    for (const [k, v] of Object.entries(measurements.followUp)) {
-      if (typeof v === 'number' && Number.isFinite(v)) {
-        tokens.push(`followup_${k}:${v}`);
-      }
-    }
-  }
-
-  return tokens;
+  // Infer category from answers or measurement keys if omitted
+  const hasNetworkKeys =
+    Object.keys(answers).some((k) => ['connection', 'activity', 'reach'].includes(k)) ||
+    (measurements?.baseline &&
+      Object.keys(measurements.baseline).some((k) =>
+        ['download_mbps', 'upload_mbps', 'ping_latency_ms', 'wifi_bars'].includes(k)
+      ));
+  const cat: Category = hasNetworkKeys ? 'network' : 'performance';
+  const analysis = analyzeCase({ category: cat, answers, measurements });
+  return analysis.evidenceUsed;
 }
 
 /**
@@ -63,10 +56,19 @@ function sanitizeForPrompt(input: string): string {
 
 /**
  * Checks for malicious, dangerous, or unverified command instructions in text.
- * Rejects terminal commands, scripts, security-disabling advice, and arbitrary execution.
+ * Rejects terminal commands, scripts, security-disabling advice, code blocks,
+ * and external URL schemes.
  */
 export function isMaliciousText(text: string): boolean {
   if (typeof text !== 'string') return true;
+
+  // Reject code blocks, shell evaluation syntax, script tags, and URLs
+  if (/<script/i.test(text) || /```/.test(text) || /\$\(/.test(text) || /\$\{/.test(text)) {
+    return true;
+  }
+  if (/\b(https?|ftp|file|data):/i.test(text)) {
+    return true;
+  }
 
   const dangerousPatterns = [
     /powershell/i,
@@ -93,6 +95,8 @@ export function isMaliciousText(text: string): boolean {
     /reg\s+(add|delete)/i,
     /hkey_/i,
     /\.(exe|bat|ps1|vbs|sh)\b/i,
+    /\b(rundll32|mshta|cscript|wscript)\b/i,
+    /\b(net\s+stop|net\s+start|sc\s+config)\b/i,
   ];
 
   return dangerousPatterns.some((pattern) => pattern.test(text));
@@ -120,18 +124,22 @@ export function validateAndNormalizeAIResponse(
 
   const obj = raw as Record<string, unknown>;
 
-  // 1. Validate summary: required non-empty string, min 10 chars, max 1000 chars, no malicious content
+  const unsupportedCertaintyRegex =
+    /\b(definitely|guaranteed|100%|undoubtedly|proven root cause|confirmed root cause|will definitely|permanent fix)\b/i;
+
+  // 1. Validate summary: required non-empty string, min 10 chars, max 1000 chars, no malicious content, no unsupported certainty
   if (
     typeof obj.summary !== 'string' ||
     obj.summary.trim().length < 10 ||
     obj.summary.length > 1000 ||
-    isMaliciousText(obj.summary)
+    isMaliciousText(obj.summary) ||
+    unsupportedCertaintyRegex.test(obj.summary)
   ) {
     return generateDeterministicAIExplanation(category, evidenceUsed, latencyMs, 'deterministic-fallback');
   }
   const summary = obj.summary.trim();
 
-  // 2. Validate likelyCauses: must be a non-empty array of strings (1-5), each non-empty, max 300 chars, no malicious content
+  // 2. Validate likelyCauses: must be a non-empty array of strings (1-5), each non-empty, max 300 chars, no malicious content, no unsupported certainty
   if (!Array.isArray(obj.likelyCauses) || obj.likelyCauses.length === 0 || obj.likelyCauses.length > 5) {
     return generateDeterministicAIExplanation(category, evidenceUsed, latencyMs, 'deterministic-fallback');
   }
@@ -141,7 +149,8 @@ export function validateAndNormalizeAIResponse(
       typeof cause !== 'string' ||
       cause.trim().length === 0 ||
       cause.length > 300 ||
-      isMaliciousText(cause)
+      isMaliciousText(cause) ||
+      unsupportedCertaintyRegex.test(cause)
     ) {
       return generateDeterministicAIExplanation(category, evidenceUsed, latencyMs, 'deterministic-fallback');
     }
@@ -245,18 +254,18 @@ export function generateDeterministicAIExplanation(
     cautions.push('Avoid downloading third-party "internet accelerator" or driver updater software.');
     cautions.push('Do not modify router firewall settings or disable security features.');
   } else {
-    // performance category
+    // performance category: approved checks are scope, resources, storage, restart
     if (evidenceStr.includes('scope:one_app')) {
       likelyCauses.push('Slowdown is isolated to a single application; check that application vendor updates and official recommendations.');
-      recommendedCheckIds.push('scope', 'startup_apps');
+      recommendedCheckIds.push('scope', 'restart');
     } else if (evidenceStr.includes('scope:whole_device')) {
       likelyCauses.push('Device-wide responsiveness symptom; verify active background workload and system drive capacity.');
-      recommendedCheckIds.push('background_tasks', 'storage');
+      recommendedCheckIds.push('resources', 'storage');
     }
 
     if (evidenceStr.includes('resources:cpu') || evidenceStr.includes('resources:memory')) {
       likelyCauses.push('Sustained high hardware utilization recorded during active tasks. Observe specific process demands in Task Manager.');
-      if (!recommendedCheckIds.includes('background_tasks')) recommendedCheckIds.push('background_tasks');
+      if (!recommendedCheckIds.includes('resources')) recommendedCheckIds.push('resources');
     }
 
     if (evidenceStr.includes('storage:low')) {
@@ -266,7 +275,7 @@ export function generateDeterministicAIExplanation(
 
     if (likelyCauses.length === 0) {
       likelyCauses.push('Initial observations do not isolate a specific performance bottleneck. Follow the diagnostic checks to isolate the symptom.');
-      recommendedCheckIds.push('startup_apps', 'background_tasks');
+      recommendedCheckIds.push('scope', 'resources');
     }
 
     summary = `Based on ${evidenceUsed.length} recorded observation(s), your system symptoms suggest ${likelyCauses[0].toLowerCase()}`;
