@@ -1,15 +1,20 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import {
+  Activity,
+  AlertTriangle,
   ArrowDownToLine,
   ArrowLeft,
   ArrowRight,
+  BarChart3,
   Check,
   CheckCircle2,
   ChevronRight,
   CircleHelp,
   ClipboardList,
+  Clock,
   Cpu,
+  CreditCard,
   Inbox,
   LayoutDashboard,
   Loader2,
@@ -20,6 +25,7 @@ import {
   Search,
   ShieldAlert,
   ShieldCheck,
+  Sparkles,
   Trash2,
   User,
   Wifi,
@@ -35,6 +41,8 @@ import type {
   UserProfile,
 } from '@/lib/contracts';
 import { canAccessQueue } from '@/lib/contracts';
+import { intakeDraftKey, parseIntakeDraft, makeIntakeSubmission, type IntakeSubmission } from '@/lib/intake-draft';
+import { summarizeWorkspaceMetrics } from '@/lib/workspace-metrics';
 import {
   DIAGNOSTIC_RULE_VERSION,
   caseAnalysis,
@@ -83,7 +91,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export default function TechSupportApp({ displayName }: { displayName: string }) {
-  const [view, setView] = useState<'overview' | 'cases' | 'new' | 'detail' | 'queue'>('overview');
+  const [view, setView] = useState<'overview' | 'cases' | 'new' | 'detail' | 'queue' | 'metrics'>('overview');
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [cases, setCases] = useState<CaseRecord[]>([]);
   const [queueCases, setQueueCases] = useState<CaseRecord[]>([]);
@@ -91,6 +99,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
   const [selected, setSelected] = useState<CaseRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [draftRestored, setDraftRestored] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [form, setForm] = useState<IntakeInput>(initial);
@@ -117,11 +126,86 @@ export default function TechSupportApp({ displayName }: { displayName: string })
   const [queueStatus, setQueueStatus] = useState('all');
 
   const generation = useRef(0);
-  const previousView = useRef<'cases' | 'queue'>('cases');
+  const previousView = useRef<'cases' | 'queue' | 'metrics'>('cases');
+  const [submission, setSubmission] = useState<IntakeSubmission | null>(null);
+  const submissionRef = useRef<IntakeSubmission | null>(null);
+  const ownerRef = useRef<string | null>(null);
+  const [draftOwnerId, setDraftOwnerId] = useState<string | null>(null);
+  const [draftWarning, setDraftWarning] = useState('');
+  const [draftBlocked, setDraftBlocked] = useState(false);
+  const [dataReady, setDataReady] = useState(false);
+  const [dataAsOf, setDataAsOf] = useState<string | null>(null);
+  const [queueReady, setQueueReady] = useState(false);
+  const [queueAsOf, setQueueAsOf] = useState<string | null>(null);
+  const retryTrigger = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (view === 'new' && submission && !busy) retryTrigger.current?.focus();
+  }, [view, submission, busy]);
 
   function cancelDelete() {
     restoreDeleteFocus.current = true;
     setDeleteOpen(false);
+  }
+
+  useEffect(() => {
+    const owner = currentUser?.userId;
+    ownerRef.current = owner ?? null;
+    submissionRef.current = null;
+    setSubmission(null);
+    setForm(initial);
+    setDraftRestored(false);
+    setDraftBlocked(false);
+    setDraftWarning('');
+    setDraftOwnerId(null);
+    if (!owner) return;
+    try {
+      const raw = sessionStorage.getItem(intakeDraftKey(owner));
+      const saved = parseIntakeDraft(raw, owner);
+      if (saved) {
+        setForm(saved.submission?.payload ?? saved.form);
+        submissionRef.current = saved.submission;
+        setSubmission(saved.submission);
+        setDraftRestored(true);
+      } else if (raw !== null) {
+        setDraftBlocked(true);
+        setDraftWarning('This saved draft could not be restored safely. Discard it explicitly before starting a new attempt; an earlier save may exist in My cases.');
+      }
+    } catch {
+      setDraftWarning('Browser storage is unavailable. Drafts and retry keys stay in this tab only; keep it open until a save is confirmed.');
+    }
+    setDraftOwnerId(owner);
+  }, [currentUser?.userId]);
+
+  function persistDraft(nextForm: IntakeInput, nextSubmission: IntakeSubmission | null) {
+    const owner = ownerRef.current;
+    if (!owner) return;
+    try {
+      if (!nextSubmission && !nextForm.title && !nextForm.description && !nextForm.deviceName) {
+        sessionStorage.removeItem(intakeDraftKey(owner));
+      } else {
+        sessionStorage.setItem(intakeDraftKey(owner), JSON.stringify({ version: 1, ownerId: owner, form: nextForm, submission: nextSubmission }));
+      }
+    } catch {
+      setDraftWarning('Browser storage is unavailable. Drafts and retry keys stay in this tab only; keep it open until a save is confirmed.');
+    }
+  }
+
+  useEffect(() => {
+    if (view === 'new' && currentUser?.userId === draftOwnerId && !draftBlocked) {
+      persistDraft(form, submission);
+    }
+  }, [form, submission, view, draftOwnerId, currentUser?.userId, draftBlocked]);
+
+  function discardDraft() {
+    if (busy) return;
+    submissionRef.current = null;
+    setSubmission(null);
+    setForm(initial);
+    setDraftRestored(false);
+    setDraftBlocked(false);
+    persistDraft(initial, null);
+    setNotice('Draft discarded. Check My cases for any earlier uncertain save before deliberately creating another case.');
   }
 
   useEffect(() => {
@@ -133,20 +217,41 @@ export default function TechSupportApp({ displayName }: { displayName: string })
 
   useEffect(() => {
     let mounted = true;
+    generation.current++;
+    ownerRef.current = null;
+    submissionRef.current = null;
+    setCurrentUser(null);
+    setSelected(null);
+    setDraftOwnerId(null);
+    setSubmission(null);
+    setForm(initial);
+    setDataReady(false);
+    setQueueReady(false);
+    setQueueLoading(false);
+    setLoading(true);
+    setCases([]);
+    setQueueCases([]);
     async function loadInitial() {
       try {
         const authData = await request<{ user: UserProfile }>('/api/auth/me');
         if (!mounted) return;
         setCurrentUser(authData.user);
+        setSelected(null);
+        setView('overview');
+        generation.current++;
 
         const casesData = await request<{ cases: CaseRecord[] }>('/api/cases');
         if (!mounted) return;
         setCases(casesData.cases);
+        setDataReady(true);
+        setDataAsOf(new Date().toISOString());
 
         if (canAccessQueue(authData.user.role)) {
           const qData = await request<{ cases: CaseRecord[] }>('/api/cases?scope=queue');
           if (!mounted) return;
           setQueueCases(qData.cases);
+          setQueueReady(true);
+          setQueueAsOf(new Date().toISOString());
         }
       } catch (e) {
         if (!mounted) return;
@@ -162,18 +267,22 @@ export default function TechSupportApp({ displayName }: { displayName: string })
   }, [displayName]);
 
   async function loadQueue() {
+    const owner = currentUser?.userId;
+    if (!owner) return;
     setQueueLoading(true);
+    setQueueReady(false);
     try {
       const d = await request<{ cases: CaseRecord[] }>('/api/cases?scope=queue');
+      if (ownerRef.current !== owner) return;
       setQueueCases(d.cases);
+      setQueueReady(true);
+      setQueueAsOf(new Date().toISOString());
     } catch (e) {
-      setError((e as Error).message);
+      if (ownerRef.current === owner) setError((e as Error).message);
     } finally {
-      setQueueLoading(false);
+      if (ownerRef.current === owner) setQueueLoading(false);
     }
   }
-
-
 
   function navigate(v: typeof view) {
     generation.current++;
@@ -186,8 +295,11 @@ export default function TechSupportApp({ displayName }: { displayName: string })
     }
   }
 
-  function start(c: Category = 'performance') {
-    setForm({ ...initial, category: c });
+  function start(c?: Category) {
+    if (busy) return;
+    if (!submissionRef.current && !form.title && !form.description && !form.deviceName && !draftRestored) {
+      setForm({ ...initial, category: c ?? 'performance' });
+    }
     navigate('new');
   }
 
@@ -217,31 +329,48 @@ export default function TechSupportApp({ displayName }: { displayName: string })
   }
 
   function updateRecord(c: CaseRecord) {
+    setDataAsOf(new Date().toISOString());
+    setQueueAsOf(new Date().toISOString());
     setCases((old) => [c, ...old.filter((x) => x.id !== c.id)].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
     setQueueCases((old) => [c, ...old.filter((x) => x.id !== c.id)].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
   }
 
-  async function create(e: React.FormEvent) {
-    e.preventDefault();
-    if (busy) return;
+  async function create(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (busy || !currentUser || draftOwnerId !== currentUser.userId || draftBlocked) return;
+    const owner = currentUser.userId;
     setBusy(true);
     setError('');
     const g = generation.current;
+    let attempt: IntakeSubmission;
     try {
-      const d = await request<{ case: CaseRecord }>('/api/cases', { method: 'POST', body: JSON.stringify(form) });
+      attempt = submissionRef.current ?? makeIntakeSubmission(form);
+      submissionRef.current = attempt;
+      setSubmission(attempt);
+      persistDraft(attempt.payload, attempt);
+      const d = await request<{ case: CaseRecord }>('/api/cases', {
+        method: 'POST', headers: { 'Idempotency-Key': attempt.key }, body: JSON.stringify(attempt.payload),
+      });
+      if (!d.case?.id) throw new Error('The save response could not be confirmed. Retry this same attempt.');
+      if (ownerRef.current !== owner || submissionRef.current !== attempt) return;
       updateRecord(d.case);
+      submissionRef.current = null;
+      setSubmission(null);
+      setForm(initial);
+      persistDraft(initial, null);
+      setDraftRestored(false);
       if (g !== generation.current) return;
       setSelected(d.case);
-      setNotes('');
-      setStaffNotes('');
+      setNotes(d.case.notes);
+      setStaffNotes(d.case.internalNotes ?? '');
       setStaffStatus(d.case.status);
-      setStaffAssignedTo('');
+      setStaffAssignedTo(d.case.assignedTo ?? '');
       setStep(0);
       syncMeasurementInputs(d.case);
       previousView.current = 'cases';
       navigate('detail');
     } catch (e) {
-      if (g === generation.current) setError((e as Error).message);
+      if (g === generation.current && ownerRef.current === owner) setError((e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -353,7 +482,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
       setQueueCases((old) => old.filter((c) => c.id !== id));
       if (g === generation.current) {
         setSelected(null);
-        setNotice('Case permanently purged in accordance with our data retention policy.');
+        setNotice('Case deleted from the active database. Existing backups may retain older copies; minimal retry metadata is retained to prevent recreation by an old request.');
         navigate(previousView.current === 'queue' && canAccessQueue(currentUser?.role ?? 'customer') ? 'queue' : 'cases');
       }
     } catch (e) {
@@ -412,6 +541,10 @@ export default function TechSupportApp({ displayName }: { displayName: string })
   const answered = selected ? checks.filter((c) => selected.answers[c.id]).length : 0;
 
   const isStaff = canAccessQueue(currentUser?.role ?? 'customer');
+
+  function UnavailableRecords() {
+    return <div className="empty" role="status"><h3>Workspace unavailable</h3><p>Records could not be loaded. This does not mean there are no saved cases.</p><button className="button secondary" onClick={() => window.location.reload()}>Reload workspace</button></div>;
+  }
 
   function CaseList({ items, fromQueue = false }: { items: CaseRecord[]; fromQueue?: boolean }) {
     return (
@@ -479,7 +612,15 @@ export default function TechSupportApp({ displayName }: { displayName: string })
             onClick={() => navigate('cases')}
           >
             <ClipboardList size={19} />
-            My cases<span className="nav-count">{cases.length}</span>
+            My cases<span className="nav-count">{dataReady ? cases.length : "—"}</span>
+          </button>
+          <button
+            className={view === 'metrics' ? 'nav-item active' : 'nav-item'}
+            aria-current={view === 'metrics' ? 'page' : undefined}
+            onClick={() => navigate('metrics')}
+          >
+            <BarChart3 size={19} />
+            Metrics
           </button>
           <button aria-current={view === 'new' ? 'page' : undefined} className={view === 'new' ? 'nav-item active' : 'nav-item'} onClick={() => start()}>
             <Plus size={19} />
@@ -514,6 +655,8 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                 ? 'New case'
                 : view === 'queue'
                 ? 'Support queue'
+                : view === 'metrics'
+                ? 'Operational metrics'
                 : view === 'cases'
                 ? 'My cases'
                 : 'Overview'}
@@ -595,7 +738,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                   </span>
                   <div>
                     <small>All cases</small>
-                    <strong>{loading ? '—' : cases.length}</strong>
+                    <strong>{loading || !dataReady ? '—' : cases.length}</strong>
                   </div>
                 </div>
                 <div>
@@ -604,7 +747,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                   </span>
                   <div>
                     <small>Working through</small>
-                    <strong>{loading ? '—' : active}</strong>
+                    <strong>{loading || !dataReady ? '—' : active}</strong>
                   </div>
                 </div>
                 <div>
@@ -613,7 +756,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                   </span>
                   <div>
                     <small>Marked resolved</small>
-                    <strong>{loading ? '—' : cases.filter((c) => c.status === 'resolved').length}</strong>
+                    <strong>{loading || !dataReady ? '—' : cases.filter((c) => c.status === 'resolved').length}</strong>
                   </div>
                 </div>
               </section>
@@ -657,7 +800,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                   <Loader2 className="spin" />
                   Loading your workspace…
                 </div>
-              ) : cases.length ? (
+              ) : !dataReady ? (<UnavailableRecords />) : cases.length ? (
                 <CaseList items={cases.slice(0, 4)} />
               ) : (
                 <div className="empty compact">
@@ -717,7 +860,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                   <Loader2 className="spin" />
                   Loading cases…
                 </div>
-              ) : filtered.length ? (
+              ) : !dataReady ? (<UnavailableRecords />) : filtered.length ? (
                 <CaseList items={filtered} />
               ) : (
                 <div className="empty">
@@ -776,25 +919,25 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                     <div className="panel" style={{ padding: '16px 20px' }}>
                       <small className="eyebrow">TOTAL IN QUEUE</small>
                       <strong style={{ fontSize: 26, display: 'block', marginTop: 4 }}>
-                        {queueLoading ? '—' : queueCases.length}
+                        {queueLoading || !queueReady ? '—' : queueCases.length}
                       </strong>
                     </div>
                     <div className="panel" style={{ padding: '16px 20px' }}>
                       <small className="eyebrow" style={{ color: '#9d7c38' }}>UNASSIGNED / OPEN</small>
                       <strong style={{ fontSize: 26, display: 'block', marginTop: 4 }}>
-                        {queueLoading ? '—' : queueCases.filter((c) => c.status === 'open' || !c.assignedTo).length}
+                        {queueLoading || !queueReady ? '—' : queueCases.filter((c) => c.status === 'open' || !c.assignedTo).length}
                       </strong>
                     </div>
                     <div className="panel" style={{ padding: '16px 20px' }}>
                       <small className="eyebrow" style={{ color: '#a85b3b' }}>ESCALATED (NEEDS TECH)</small>
                       <strong style={{ fontSize: 26, display: 'block', marginTop: 4 }}>
-                        {queueLoading ? '—' : queueCases.filter((c) => c.status === 'escalated').length}
+                        {queueLoading || !queueReady ? '—' : queueCases.filter((c) => c.status === 'escalated').length}
                       </strong>
                     </div>
                     <div className="panel" style={{ padding: '16px 20px' }}>
                       <small className="eyebrow" style={{ color: '#4b7a54' }}>RESOLVED</small>
                       <strong style={{ fontSize: 26, display: 'block', marginTop: 4 }}>
-                        {queueLoading ? '—' : queueCases.filter((c) => c.status === 'resolved').length}
+                        {queueLoading || !queueReady ? '—' : queueCases.filter((c) => c.status === 'resolved').length}
                       </strong>
                     </div>
                   </section>
@@ -839,7 +982,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                       <Loader2 className="spin" />
                       Loading support queue…
                     </div>
-                  ) : filteredQueue.length ? (
+                  ) : !queueReady ? (<UnavailableRecords />) : filteredQueue.length ? (
                     <div className="queue-table-container">
                       <table className="queue-table">
                         <thead>
@@ -918,6 +1061,42 @@ export default function TechSupportApp({ displayName }: { displayName: string })
             </>
           )}
 
+          {view === 'metrics' && (() => {
+            const ready = isStaff ? queueReady : dataReady;
+            const pending = loading || (isStaff && queueLoading);
+            if (pending) return <p role="status">Loading workspace metrics…</p>;
+            if (!ready) return <div className="empty" role="status"><h1>Metrics unavailable</h1><p>The workspace records could not be loaded. Reload to try again; an unknown population is not zero cases.</p></div>;
+            const cohort = (isStaff ? queueCases : cases).slice(0, 200);
+            const summary = summarizeWorkspaceMetrics(cohort);
+            const ratio = (count: number, total: number) => total ? `${count} / ${total} (${(100 * count / total).toFixed(1)}%)` : 'No eligible records';
+            return <>
+              <div className="page-heading"><div><p className="eyebrow">RETAINED RECORD SNAPSHOT</p><h1>Workspace metrics</h1></div></div>
+              <div className="alert" role="note"><strong>Demo workspace — synthetic cases; not customer results.</strong></div>
+              <p>Scope: {isStaff ? 'authorized support queue' : 'your signed-in owner workspace'}. Sample: up to 200 most recently updated loaded records; older records may be omitted. Creation window: all dates represented in this sample. Snapshot collected: {isStaff ? queueAsOf : dataAsOf} (UTC), with confirmed local updates included.</p>
+              <p>These are current retained records, not lifetime rates. Deleted cases are absent. Historical customer/test classification and attributable customer reports are unavailable.</p>
+              <div className="metrics-grid">
+                <div className="metric-card"><h2>Loaded retained cases</h2><strong className="metric-value">{summary.caseCount}</strong></div>
+                <div className="metric-card"><h2>Guided checklist completion</h2><strong>{summary.coverageAvailable ? ratio(summary.completedCases, summary.caseCount) : 'Unavailable — historical check vocabulary not verified'}</strong><p>Recognized answers count, including offered unknown/not-tried. This is not repair success.</p></div>
+                <div className="metric-card"><h2>Usable observation coverage</h2><strong>{summary.coverageAvailable ? ratio(summary.usableChecks, summary.totalChecks) : 'Unavailable — historical check vocabulary not verified'}</strong><p>Unknown, not-tried and invalid answers provide no usable observations.</p></div>
+                <div className="metric-card"><h2>Currently marked resolved</h2><strong>{ratio(summary.resolvedCases, summary.caseCount)}</strong><p>Current status does not establish who reported it or verify a repair.</p></div>
+                <div className="metric-card"><h2>Currently escalated</h2><strong>{ratio(summary.escalatedCases, summary.caseCount)}</strong><p>A recorded next step does not contact a technician.</p></div>
+              </div>
+              <h2>Self-reported comparisons, by metric</h2>
+              <p>Each metric has its own valid-pair denominator. Improvement does not establish causation or resolution.</p>
+              <div className="metrics-grid">{summary.metrics.map(metric => <div className="metric-card" key={metric.id}>
+                <h3>{metric.label} ({metric.unit})</h3><p>{categoryLabel(metric.category)}</p>
+                <strong>Improved: {ratio(metric.improved, metric.pairs)}</strong>
+                <p>Comparable-pair coverage: {ratio(metric.pairs, summary.caseCount)} of loaded cases.</p>
+              </div>)}</div>
+              <div className="metrics-grid">
+                <div className="metric-card disabled"><h3>Customer-reported resolution</h3><p className="metric-disabled-desc">Unavailable: attributable report history is not recorded.</p></div>
+                <div className="metric-card disabled"><h3>Active handling time</h3><p className="metric-disabled-desc">Unavailable: active time is not recorded. Creation-to-update duration is not time spent.</p></div>
+                <div className="metric-card disabled"><h3>AI request cost</h3><p className="metric-disabled-desc">Not enabled. No provider calls or billing records are available.</p></div>
+                <div className="metric-card disabled"><h3>Paid-service receipts</h3><p className="metric-disabled-desc">Not enabled. Payments and refunds are not implemented.</p></div>
+              </div>
+            </>;
+          })()}
+
           {/* VIEW: NEW CASE */}
           {view === 'new' && (
             <>
@@ -934,7 +1113,11 @@ export default function TechSupportApp({ displayName }: { displayName: string })
               </div>
               <div className="intake-grid">
                 <form className="panel intake" onSubmit={create}>
-                  <fieldset disabled={busy}>
+                  {draftRestored && <p role="status">Restored your unfinished draft from this browser tab.</p>}
+                  {draftWarning && <p role="status">{draftWarning}</p>}
+                  {submission && <div className="alert" role="status"><p>An earlier save may have succeeded. Retry the same saved request to recover its case; the submitted details are locked.</p><button ref={retryTrigger} type="button" className="button secondary" disabled={busy} onClick={() => void create()}>Retry same save</button></div>}
+                  {(draftRestored || submission || draftBlocked) && <button type="button" className="button secondary" disabled={busy} onClick={discardDraft}>Discard draft and start a new attempt</button>}
+                  <fieldset disabled={busy || !!submission || draftBlocked || !currentUser || draftOwnerId !== currentUser.userId}>
                     <legend className="field-title">What needs attention?</legend>
                     <div className="category-options">
                       {(['performance', 'network'] as Category[]).map((c) => (
@@ -1192,6 +1375,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                     <div className="category-options" style={{ marginTop: 14 }}>
                       <button
                         type="button"
+                        aria-pressed={activeMeasurementKind === 'baseline'}
                         className={activeMeasurementKind === 'baseline' ? 'selected' : ''}
                         onClick={() => setActiveMeasurementKind('baseline')}
                       >
@@ -1199,6 +1383,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                       </button>
                       <button
                         type="button"
+                        aria-pressed={activeMeasurementKind === 'followUp'}
                         className={activeMeasurementKind === 'followUp' ? 'selected' : ''}
                         onClick={() => setActiveMeasurementKind('followUp')}
                       >
@@ -1213,10 +1398,11 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                         return (
                           <div key={def.id} className="measurement-card">
                             <label htmlFor={`meas-${def.id}`}>{def.label}</label>
-                            <p className="measurement-instruction">{def.instruction}</p>
+                            <p id={`meas-desc-${def.id}`} className="measurement-instruction">{def.instruction}</p>
                             <div className="measurement-input-row">
                               <input
                                 id={`meas-${def.id}`}
+                                aria-describedby={`meas-desc-${def.id} meas-unit-${def.id}`}
                                 type="number"
                                 step="any"
                                 min={def.min}
@@ -1232,7 +1418,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                                   }
                                 }}
                               />
-                              <span className="measurement-unit">{def.unit}</span>
+                              <span id={`meas-unit-${def.id}`} className="measurement-unit">{def.unit}</span>
                             </div>
                           </div>
                         );
