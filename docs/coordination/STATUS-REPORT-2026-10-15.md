@@ -2,7 +2,7 @@
 
 ## Current result
 
-Guided-only candidate: codex/guided-release, implementation commits 1cad265 and 619d19f, [draft PR #3](https://github.com/FuwadT/relay-tech-support/pull/3). CI run 38743813212 passes. Foundation PR #1 is merged into main at 427d497. No deployment was performed in this session.
+Guided-only source is merged into main through [PR #3](https://github.com/FuwadT/relay-tech-support/pull/3), merge 62c6d21. Reviewed head 743ef84 passed CI run 38745792833, including keyboard changes. Implementation includes 1cad265 and 619d19f; foundation PR #1 remains included. No deployment was performed in this session; source integration is a separate milestone from a hosted release.
 
 The candidate retains guided checks, saved history/answers/notes/outcomes, optional measurements and historical provenance. It omits the live model adapter and AI assessment UI. Stale AI requests receive a controlled unsupported response. New diagnostics 1.0.2 preserve small changes, ignore invalid historical evidence and prompt reconciliation of conflicting resource observations. Deletion language acknowledges backups; confirmation focuses Keep case and Escape restores Delete case focus.
 
@@ -21,13 +21,13 @@ Hosted fixtures retained: QA hosted slowdown — synthetic Oct 15; QA hosted con
 
 codex/integration / [draft PR #2](https://github.com/FuwadT/relay-tech-support/pull/2) preserves Gemini's AI implementation. Its mocked-provider release checks reproduce unsafe prose and malformed schema accepted as live output: 40 of 42 unit tests pass, two fail. CI run 38742689974 fails those safety checks. No credentials or paid model calls were used. Do not merge or deploy that branch until corrected.
 
-Before external customer release: verify two real identities and hosted header stripping/session expiry, settle support assignment policy, demonstrate D1 recovery/backup expiry/deletion replay, finish accessibility review, and implement durable duplicate-create protection. The idempotency proposal is in IDEMPOTENT-CREATE-PROPOSAL.md and awaits shared owner agreement. Live AI additionally needs safe schema/evidence validation, durable request/cost limits, concurrency protection and provider acceptance.
+Before external customer release: verify two real identities and hosted header stripping/session expiry, demonstrate D1 recovery/backup expiry/deletion replay, finish accessibility review, and implement durable duplicate-create protection. Support policy now describes the implemented broad-triage access; assignment is not an enforced access boundary. The idempotency proposal is in IDEMPOTENT-CREATE-PROPOSAL.md and awaits shared owner agreement. Live AI additionally needs safe schema/evidence validation, durable request/cost limits, concurrency protection and provider acceptance.
 
 ## Next three tasks and ownership
 
 Additional keyboard improvement verified after this report's initial commit: first Tab focuses Skip to main content; Enter focuses MAIN. Deletion cancellation focus checks also pass. The current view is exposed with aria-current. TypeScript and production build pass after these UI changes. Backend and migration code are unchanged by this final accessibility increment. S6-02 remains in progress for a full screen/contrast review.
 
-1. Codex/integration: review guided PR #3 independently of live AI and complete candidate-specific hosted acceptance through the approved release workflow.
+1. Codex/integration: complete candidate-specific hosted acceptance through the approved release workflow; current source is merged but not deployed.
 2. Gemini: acknowledge TO-GEMINI.md, fix the mocked-provider failures on its AI branch and send focused commits; retain diagnostics 1.0.2 and the deletion/focus improvements where applicable.
 3. Platform/interface owners: agree the S6-03 idempotency contract and schema ownership, then implement atomic retries and verify race/failure/deletion cases.
 
