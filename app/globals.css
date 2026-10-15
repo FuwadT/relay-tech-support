@@ -415,6 +415,16 @@ input,select,textarea{border-radius:4px;color:#292724;border-color:#d3cec5;font-
   margin-top: 4px;
 }
 
+/* Small informative text must remain readable on the actual panel backgrounds. */
+.private-label, .user small, .topbar > div, .eyebrow,
+.section-heading > span, .check-navigation > span, .detail-aside small, footer {
+  color: #54504a;
+}
+button:focus-visible, a:focus-visible, input:focus-visible,
+textarea:focus-visible, select:focus-visible {
+  outline-color: #665e52;
+}
+
 /* S6-01: 390px Mobile Viewport Safety */
 @media (max-width: 420px) {
   .app-shell {
