@@ -24,4 +24,3 @@ Earlier completion counts have been withdrawn: they confused implementation with
 3. Platform owner after shared-contract agreement: S6-03 idempotent case creation for ambiguous network retries. Retained notes drafts do not establish duplicate-create protection.
 
 Codex owns independent integration/release verification. See [roles](ROLES.md), [handoff](HANDOFF.md), [release checklist](RELEASE-CHECKLIST.md) and [recovery procedure](../RECOVERY.md).
-

@@ -1,7 +1,7 @@
 # Sprint 8 — Release and next-sprint decisions
 
-**Status**: In progress (internal demo and metrics definitions; external release gates remain open)  
-**Budget**: Approximately 10 hours (600 minutes)  
+**Status**: In progress (internal demo and metrics definitions; external release gates remain open)
+**Budget**: Approximately 10 hours (600 minutes)
 **Goal**: Deliver a reviewable release and identify the next valuable improvements.
 
 ## Tasks
@@ -18,4 +18,3 @@ Released capabilities are verified, limitations are visible, and there is an own
 
 ---
 *Back to [Scrum Board](../BOARD.md)*
-
