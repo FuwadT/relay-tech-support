@@ -43,6 +43,7 @@ import type {
 import { canAccessQueue } from '@/lib/contracts';
 import { intakeDraftKey, parseIntakeDraft, makeIntakeSubmission, type IntakeSubmission } from '@/lib/intake-draft';
 import { summarizeWorkspaceMetrics } from '@/lib/workspace-metrics';
+import AIChatView from './ai-chat-view';
 import {
   DIAGNOSTIC_RULE_VERSION,
   caseAnalysis,
@@ -91,7 +92,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export default function TechSupportApp({ displayName }: { displayName: string }) {
-  const [view, setView] = useState<'overview' | 'cases' | 'new' | 'detail' | 'queue' | 'metrics'>('overview');
+  const [view, setView] = useState<'overview' | 'cases' | 'new' | 'detail' | 'queue' | 'metrics' | 'chat'>('chat');
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [cases, setCases] = useState<CaseRecord[]>([]);
   const [queueCases, setQueueCases] = useState<CaseRecord[]>([]);
@@ -228,7 +229,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
         if (!mounted) return;
         setCurrentUser(authData.user);
         setSelected(null);
-        setView('overview');
+        setView('chat');
         generation.current++;
 
         const casesData = await request<{ cases: CaseRecord[] }>('/api/cases');
@@ -573,6 +574,14 @@ export default function TechSupportApp({ displayName }: { displayName: string })
         </button>
         <div className="private-label">EARLY ACCESS</div>
         <nav aria-label="Main navigation">
+          <button
+            aria-current={view === 'chat' ? 'page' : undefined}
+            className={view === 'chat' ? 'nav-item active' : 'nav-item'}
+            onClick={() => navigate('chat')}
+          >
+            <Sparkles size={19} />
+            AI Triage Chat
+          </button>
           <button aria-current={view === 'overview' ? 'page' : undefined} className={view === 'overview' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('overview')}>
             <LayoutDashboard size={19} />
             Overview
@@ -633,7 +642,9 @@ export default function TechSupportApp({ displayName }: { displayName: string })
           <div>
             Workspace <ChevronRight size={14} />
             <span>
-              {view === 'detail'
+              {view === 'chat'
+                ? 'AI Triage & Remote Support'
+                : view === 'detail'
                 ? 'Case details'
                 : view === 'new'
                 ? 'New case'
@@ -676,6 +687,20 @@ export default function TechSupportApp({ displayName }: { displayName: string })
               <CheckCircle2 size={17} />
               {notice}
             </div>
+          )}
+
+          {/* VIEW: AI CHAT SUPPORT (PRIMARY USER EXPERIENCE) */}
+          {view === 'chat' && (
+            <AIChatView
+              currentUser={currentUser}
+              onViewCaseDetail={(caseId) => {
+                const found = cases.find((c) => c.id === caseId) || queueCases.find((c) => c.id === caseId);
+                if (found) {
+                  setSelected(found);
+                  navigate('detail');
+                }
+              }}
+            />
           )}
 
           {/* VIEW: OVERVIEW */}

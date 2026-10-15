@@ -155,5 +155,87 @@ export interface Analysis {
   evidenceUsed: string[];
   comparisons?: MeasurementComparison[];
   aiExplanation?: AIExplanation | null;
+  telemetryReport?: SystemTelemetry | null;
+  diagnosticArtifact?: DiagnosticArtifact | null;
+  proposedFix?: ProposedFix | null;
+  chatMessages?: ChatMessage[];
+}
+
+export type SupportedOS = 'windows' | 'macos' | 'linux';
+
+export interface ProcessInfo {
+  pid: number | string;
+  name: string;
+  cpuPercent: number;
+  memoryMb: number;
+}
+
+export interface SystemTelemetry {
+  os: SupportedOS;
+  osVersion: string;
+  hostname?: string;
+  cpuModel?: string;
+  cpuUsagePercent: number;
+  memoryTotalMb: number;
+  memoryUsedMb: number;
+  memoryUsagePercent: number;
+  diskTotalGb: number;
+  diskFreeGb: number;
+  diskUsagePercent: number;
+  networkConnected: boolean;
+  dnsWorking: boolean;
+  gatewayPingMs?: number | null;
+  topProcesses: ProcessInfo[];
+  systemErrors: string[];
+  collectedAt: string;
+  rawOutput?: string;
+}
+
+export interface DiagnosticArtifact {
+  id: string;
+  caseId: string;
+  defectTitle: string;
+  rootCause: string;
+  severity: 'critical' | 'warning' | 'info';
+  category: Category;
+  systemSummary: string;
+  evidence: string[];
+  helpdeskNotes: string;
+  recommendedAction: string;
+  htmlContent: string;
+  generatedAt: string;
+}
+
+export interface ProposedFix {
+  id: string;
+  title: string;
+  description: string;
+  command: string;
+  os: SupportedOS;
+  explanation: string;
+  riskLevel: 'safe' | 'low' | 'moderate';
+  executed?: boolean;
+  executedAt?: string | null;
+  verified?: boolean;
+}
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: string;
+  cardType?: 'quick-fix' | 'collector' | 'telemetry-result' | 'artifact' | 'fix';
+  cardData?: {
+    investigationPlan?: {
+      title: string;
+      reasoning: string;
+      checksToPerform: string[];
+    };
+    quickFixSteps?: string[];
+    telemetry?: SystemTelemetry;
+    artifact?: DiagnosticArtifact;
+    fix?: ProposedFix;
+    collectorCommand?: Record<SupportedOS, string>;
+  };
 }
 
