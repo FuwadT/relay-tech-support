@@ -36,3 +36,282 @@ input,select,textarea{border-radius:4px;color:#292724;border-color:#d3cec5;font-
 @media(max-width:1150px){.sidebar{width:190px}.workspace{margin-left:190px}.support-scope{width:230px;padding:0 22px}.hero{gap:10px}.hero-copy{padding:26px}}
 @media(max-width:900px){.sidebar{width:76px;padding:25px 10px}.workspace{margin-left:76px}.brand{font-size:20px;letter-spacing:-1.2px}.brand-dot{display:none}.support-scope{display:none}.hero-copy{width:100%}.hero h2{font-size:25px}}
 @media(max-width:620px){.sidebar{width:100%;padding:0 17px}.workspace{margin-left:0}.sidebar .brand{font-size:27px}.brand-dot{display:inline}.topbar{height:42px}.guided-label{font-size:9px}.hero-copy{padding:23px}.hero h2{font-size:24px}.hero p:not(.eyebrow){font-size:13px}.stats>div{padding:13px 10px}.category-card:first-child{border-right:0;border-bottom:1px solid #d7d3cb}.category-grid{gap:0}.category-card>.device-icon{top:23px}.category-card h3{padding-left:44px}.category-card{padding:21px}.page-heading p:not(.eyebrow){font-size:12px}.workspace-footer{font-size:10px}.report li{font-size:12px}}
+
+/* Measurements, Outcome Comparisons & Provenance (Sprint 3) */
+.measurement-section{margin-top:24px;border-top:1px solid #ede9e3;padding-top:20px}
+.measurement-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+@media(max-width:768px){.measurement-grid{grid-template-columns:1fr}}
+.measurement-card{background:#faf9f7;border:1px solid #e8e5df;border-radius:4px;padding:14px}
+.measurement-card label{font-size:12px;font-weight:600;color:#3b3936;margin-bottom:4px;display:block}
+.measurement-instruction{font-size:11px;color:#7a756e;margin-bottom:8px;line-height:1.4}
+.measurement-input-row{display:flex;align-items:center;gap:8px}
+.measurement-input-row input{max-width:130px;font-size:13px;padding:7px 10px;border-radius:4px}
+.measurement-unit{font-size:12px;color:#6a6660;font-weight:500}
+.comparison-table-wrapper{overflow-x:auto;margin-top:14px}
+.comparison-table{width:100%;border-collapse:collapse;font-size:12px;min-width:480px}
+.comparison-table th{text-align:left;padding:8px 10px;border-bottom:2px solid #e2ded7;color:#68645e;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px}
+.comparison-table td{padding:10px;border-bottom:1px solid #ede9e2;color:#3b3834}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:3px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px}
+.badge-improved{background:#e3f2e6;color:#276435}
+.badge-worsened{background:#fae8e6;color:#9b3726}
+.badge-unchanged{background:#f0efec;color:#69655f}
+.badge-incomplete{background:#fdf3dc;color:#856019}
+.provenance-box{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:11px 15px;background:#faf9f7;border:1px solid #eae7e1;border-radius:4px;margin-top:20px;font-size:11px;color:#6e6a64}
+.provenance-box strong{color:#3b3833}
+.provenance-evidence{font-family:monospace;font-size:10px;color:#847d73}
+.section-actions{display:flex;gap:10px;align-items:center;margin-top:14px}
+.detail-grid>*,.intake-grid>*,.panel{min-width:0}
+@media(max-width:620px){
+  .comparison-table{min-width:0;table-layout:fixed;font-size:11px}
+  .comparison-table th,.comparison-table td{padding:8px 3px;overflow-wrap:anywhere}
+  .comparison-table th{font-size:9px;letter-spacing:0}
+  .comparison-table .badge{padding:3px;font-size:8px;max-width:100%;overflow-wrap:anywhere}
+  .section-actions{flex-wrap:wrap}
+  .reason{align-items:flex-start}
+  .page-heading h1{overflow-wrap:anywhere}
+}
+
+/* Sprint 4: Role badges, Queue triage, Internal review notes, Retention policy */
+.role-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 4px;
+}
+.role-badge.staff {
+  background: #252525;
+  color: #fff;
+  border: 1px solid #3d3b38;
+}
+.role-badge.customer {
+  background: #f0efeb;
+  color: #68645d;
+  border: 1px solid #ddd9d1;
+}
+
+.demo-switcher-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.demo-switcher-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  color: #8c867c;
+  text-transform: uppercase;
+}
+.demo-switcher-select {
+  font-size: 11px;
+  padding: 4px 8px;
+  height: 32px;
+  background: #fff;
+  border: 1px solid #dcd7ce;
+  border-radius: 4px;
+  color: #2b2926;
+  font-weight: 500;
+  width: auto;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.queue-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+@media (max-width: 900px) {
+  .queue-stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 540px) {
+  .queue-stats-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.queue-table-container {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow-x: auto;
+}
+.queue-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  min-width: 780px;
+}
+.queue-table th {
+  text-align: left;
+  padding: 11px 14px;
+  background: #faf8f5;
+  border-bottom: 1px solid #ded9d0;
+  color: #6e6961;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+.queue-table td {
+  padding: 13px 14px;
+  border-bottom: 1px solid #f1eeea;
+  color: #383531;
+  vertical-align: middle;
+}
+.queue-table tr:hover td {
+  background: #fbfaf8;
+}
+.case-id-code {
+  font-family: monospace;
+  font-size: 11px;
+  background: #f0ede6;
+  color: #49453f;
+  padding: 3px 6px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+.queue-title-cell strong {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 3px;
+}
+.queue-title-cell span {
+  font-size: 10px;
+  color: #817a70;
+}
+.staff-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: #433f3a;
+  background: #f3efe9;
+  padding: 3px 8px;
+  border-radius: 3px;
+}
+.staff-unassigned {
+  font-style: italic;
+  color: #9c958a;
+  font-size: 11px;
+}
+
+.staff-ops-panel {
+  border-top: 3px solid #252525;
+  margin-bottom: 20px;
+}
+.staff-notice-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  background: #fef8ee;
+  border: 1px solid #fae6be;
+  border-radius: 4px;
+  margin-bottom: 18px;
+  color: #8c5b16;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.staff-notice-banner strong {
+  display: block;
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+
+.forbidden-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 60px 24px;
+  max-width: 620px;
+  margin: 40px auto;
+  background: #fff;
+  border: 1px solid #e0dbd2;
+  border-radius: 4px;
+}
+.forbidden-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #fbf2ee;
+  color: #af4d35;
+  display: grid;
+  place-items: center;
+  margin-bottom: 20px;
+}
+.forbidden-container h2 {
+  font-size: 22px;
+  margin-bottom: 12px;
+}
+.forbidden-container p {
+  font-size: 13px;
+  color: #6e685f;
+  line-height: 1.6;
+  margin-bottom: 24px;
+  max-width: 480px;
+}
+.forbidden-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.retention-box {
+  background: #fff5f2;
+  border: 1px solid #f6d1c7;
+  border-radius: 4px;
+  padding: 12px 14px;
+  margin: 12px 0 16px;
+  font-size: 11px;
+  color: #923f29;
+  line-height: 1.5;
+}
+.retention-box strong {
+  display: block;
+  margin-bottom: 3px;
+}
+
+.danger-zone-staff-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 11px;
+  color: #817970;
+  line-height: 1.5;
+  background: #f5f3ef;
+  border: 1px solid #e3ded6;
+  border-radius: 4px;
+  padding: 10px 12px;
+}
+
+.button.compact {
+  padding: 6px 12px;
+  min-height: 32px;
+  font-size: 11px;
+  gap: 6px;
+}
+
+.triage-hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: #252525;
+  color: #fff;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+

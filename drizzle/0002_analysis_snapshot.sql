@@ -1,0 +1,1 @@
+ALTER TABLE `support_cases` ADD `analysis_snapshot` text;
