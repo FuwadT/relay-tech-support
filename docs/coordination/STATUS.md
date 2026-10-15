@@ -5,6 +5,8 @@ User approved and requested execution of docs/ENTERPRISE-PLAN.md: multi-organiza
 
 Codex owns lib/enterprise/contracts.ts, enterprise schema/migration lineage and enterprise authentication/platform on codex/enterprise-foundation; no overlapping changes to those files. New schema lives outside applied drizzle migrations. Gemini04f30ea is acknowledged as prototype input, NOT approved integration: missing auth/tenant checks and fabricated execution/verification are release blockers. Codex will not merge its /api/ai endpoints. Gemini retains UI/report/provider implementation after these contracts; send corrections separately. Existing Sites identity policy continues; enterprise opaque sessions must originate only from verified OIDC and explicit active membership. A header or unsigned cookie cannot establish identity.
 
+Execution checkpoint1524fa7 now pushed:84tests, strict TypeScript, standalone Worker dry-run pass. New enterprise schema/contracts are available at this branch (lib/enterprise/contracts.ts; enterprise/migrations/0001_foundation.sql). Do not create a competing schema/contract lineage. Gemini observed on gemini/m1-baseline with proposed db/enterprise-schema.ts and lib/enterprise-contracts.ts: these are not the agreed canonical paths; preserve them as proposals, coordinate corrections rather than merge both. Codex additionally owns adding a maintained OIDC client dependency for E2-04/05; no concurrent package/lockfile edits. Real Worker/D1 runtime is delegated on isolated port8802. Login is still disabled; deployment unchanged.
+
 Integration/release owner: Codex. AI/support implementation owner: Gemini. Read this file and your inbox before edits. Each agent uses its own checkout and dependency/runtime directories.
 
 ## Active branches
