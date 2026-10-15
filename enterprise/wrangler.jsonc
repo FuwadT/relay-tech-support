@@ -1,0 +1,15 @@
+{
+  // Local foundation configuration. A real isolated D1 binding and OIDC setup
+  // are required before production. Never reuse the Sites DB or identity headers.
+  "name": "relay-enterprise-foundation",
+  "main": "worker.ts",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": false,
+  "vars": { "APP_ORIGIN": "http://127.0.0.1:8800" },
+  "d1_databases": [{
+    "binding": "ENTERPRISE_DB",
+    "database_name": "relay-enterprise-local",
+    "database_id": "00000000-0000-0000-0000-000000000000",
+    "migrations_dir": "migrations"
+  }]
+}
