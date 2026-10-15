@@ -5,6 +5,7 @@ import { cases } from '../../../db/schema';
 import { analyzeCase, DIAGNOSTIC_RULE_VERSION } from '../../../lib/diagnostics';
 import { apiError, publicCase } from '../../../lib/case-store';
 import { assertMutationRequest, readJson, validateIntake } from '../../../lib/validation';
+import { createIdempotentCase, parseCreateKey } from '../../../lib/idempotent-create';
 
 export async function GET(request: Request) {
   const user = await getChatGPTUser(request);
@@ -52,6 +53,7 @@ export async function POST(request: Request) {
     const body = await readJson(request);
     assertMutationRequest(request);
     const input = validateIntake(body);
+    const createKey = parseCreateKey(request.headers.get('Idempotency-Key'));
     const now = new Date().toISOString();
     const row = {
       ...input,
@@ -73,6 +75,17 @@ export async function POST(request: Request) {
       verifiedAt: null,
     };
     const saved = { ...row, ruleVersion: DIAGNOSTIC_RULE_VERSION, analysisSnapshot: analyzeCase(row) };
+    if (createKey !== null) {
+      const result = await createIdempotentCase(getDb(), saved, createKey, input);
+      if (result.outcome === 'conflict') {
+        return Response.json({ error: 'This attempt already used different case details. Start a new attempt to submit changed details.' }, { status: 409 });
+      }
+      if (result.outcome === 'deleted') {
+        return Response.json({ error: 'The case from this attempt was deleted. Start a new attempt to create a new case.' }, { status: 410 });
+      }
+      return Response.json({ case: publicCase(result.row, user.role), replayed: result.replayed },
+        { status: result.replayed ? 200 : 201, headers: { 'Cache-Control': 'private, no-store' } });
+    }
     await getDb().insert(cases).values(saved);
     return Response.json({ case: publicCase(saved, user.role) }, { status: 201 });
   } catch (error) {

@@ -183,7 +183,7 @@ export async function DELETE(request: Request, context: Context) {
     return Response.json({
       ok: true,
       deletedId: id,
-      policy: 'Customer-requested permanent purge complete.',
+      policy: 'The active case record was deleted. Existing backups may retain older copies.',
     });
   } catch (error) {
     return apiError(error);
