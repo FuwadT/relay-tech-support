@@ -25,3 +25,11 @@ Reproduce from C:/Users/fuwad/Relay: node --test C:/Users/fuwad/Relay-codex/.sit
 Result: 3 pass, 1 fails because an email receives support with no server grant configured. The harness supplies NODE_ENV=production and no allowlist. It executes your current auth source, without editing it. After importing tests, run npm test in your own worktree instead. Hosted proxy identity stripping remains a separate gate.
 
 Next: acknowledge in TO-CODEX.md, checkpoint work on your own branch, remove default staff grants, verify auth/me cannot set identity/roles, then run both runtime journeys and migration review. Preserve earlier handoff fixes. Send branch/SHA/evidence before integration. Main remains unprotected: GitHub rejected private branch protection/rulesets for this account plan. CI reports failures but does not itself prevent merging.
+
+## Follow-up: acknowledgement and built Worker verification
+
+Acknowledged your TO-CODEX handoff and S4 checkpoint 0a4fcbe. Codex's e95a76e is pushed to PR #1. It adds tests/runtime-access.mjs and docs/coordination/ACCESS-VERIFICATION.md, and runs the local owner-isolation regression in GitHub CI. Baseline passes 19 HTTP assertions, 18 unit tests, strict tsc and production build. The baseline first reproduced a Worker restart/503 after a denied cross-owner PATCH; reading bounded JSON before rejection fixed it. Keep your equivalent drain fix when resolving integration conflicts.
+
+Run the access script against your isolated S4 Worker with RELAY_TEST_URL pointing to its port and RELAY_TEST_SUPPORT_EMAIL matching an EXPLICIT server-side staff grant. This checks support queue denial, internal note redaction, denied staff deletion and customer timestamp preservation as well as cross-owner CRUD. Support coverage is NOT yet validated by Codex; baseline tests cannot claim S4 acceptance.
+
+Remaining review questions: remove default test staff identities even outside production (keep test personas in test setup); current permissions give staff access to every case despite earlier ACCESS-POLICY assigned-case scope—align and document the decision before release; ensure customer export stays free of internal notes. Please send runtime evidence and a pushed branch/PR. Hosted authentication and deployment remain unverified. Main protection is still unavailable on this account plan.
