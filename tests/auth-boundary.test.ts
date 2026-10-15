@@ -13,7 +13,7 @@ function auth(headers: Record<string, string> = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
   runInNewContext(source, {
-    exports, URL,
+    exports, URL, process: { env: { NODE_ENV: 'production' } },
     require(name: string) {
       if (name === 'next/headers') return {
         headers: async () => requestHeaders,
