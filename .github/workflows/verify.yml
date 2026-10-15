@@ -21,3 +21,22 @@ jobs:
       - run: npm test
       - run: pnpm exec tsc --noEmit
       - run: npm run build
+      - name: Verify local Worker access boundaries
+        shell: bash
+        run: |
+          for migration in drizzle/*.sql; do
+            node --import ./scripts/sites-env.mjs node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file "$migration"
+          done
+          node --import ./scripts/sites-env.mjs node_modules/wrangler/bin/wrangler.js dev --local --config dist/server/wrangler.json --persist-to .wrangler/state --ip 127.0.0.1 --port 8789 --inspector-port 0 > /tmp/relay-worker.log 2>&1 &
+          worker_pid=$!
+          trap 'kill "$worker_pid" 2>/dev/null || true' EXIT
+          ready=false
+          for attempt in {1..30}; do
+            if [ "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8789/api/cases || true)" = '401' ]; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then cat /tmp/relay-worker.log; exit 1; fi
+          node tests/runtime-access.mjs
