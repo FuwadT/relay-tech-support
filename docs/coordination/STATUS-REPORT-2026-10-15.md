@@ -32,3 +32,7 @@ Additional keyboard improvement verified after this report's initial commit: fir
 3. Platform/interface owners: agree the S6-03 idempotency contract and schema ownership, then implement atomic retries and verify race/failure/deletion cases.
 
 GitHub branch protection remains unavailable under the repository's current plan. PRs and CI are in place, but they do not enforce merge restrictions by themselves. The latest quota snapshot in chat showed 65% of the five-hour allowance remaining; this report is a saved checkpoint before ending work, not an exhaustion notice.
+
+## Updated owner-only demo released
+PR #4 merged at 6dd00e4; CI 38786728384 passed. Sites version 3 deployed successfully on October 15. Current owner-session case creation, measurements/save/reload, legacy-case compatibility, export redaction and focused keyboard checks pass. See DEMO-RELEASE-2026-10-15.md for exact source, version, deployment IDs and limits. Earlier no-deployment/version-2 statements describe the previous checkpoint. The scoped guided demo is ready now; external release remains held.
+
