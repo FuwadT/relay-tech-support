@@ -11,6 +11,7 @@ Candidate: `codex/integration`, incorporating Gemini `90b6d5d` at merge `0becdd7
 - `node tests/runtime-access.mjs` with the same URL and `RELAY_TEST_SUPPORT_EMAIL=operator@example.invalid`: 27 HTTP assertions plus payload checks pass. Worker was explicitly started with `--var RELAY_SUPPORT_EMAILS:operator@example.invalid`. Includes two customer identities and a configured support identity, queue denial, notes redaction, denial of support deletion, and preservation of customer outcome timestamp. All API fixtures removed.
 - `node scripts/verify-recovery.mjs`: migrations 0000–0003, metadata chain/columns, synthetic backup content, integrity, owner index and deletion behavior pass.
 - GitHub run `38735418267`: passes the earlier integration CI configuration. The next CI change adds both workflow and configured-support runtime coverage; its result must be checked separately.
+- GitHub run `38736047260` on `24cb148`: passes both runtime suites (62 HTTP assertions), configured support grant, recovery rehearsal, 36 unit tests, TypeScript and build.
 
 ## Browser checks
 
@@ -21,6 +22,8 @@ Built Worker on port 8789; `node tests/local-browser-preview.mjs` provides a loo
 - Connectivity journey: four answers including “unknown”; notes and “Needs a technician” status. Reopened after reload with outcome and notes preserved. Answer/next/save controls were activated with keyboard Enter during this journey.
 - At 390×844: intake and case detail document width 375px, history width 390px; no horizontal page overflow observed. Visual check showed usable answer buttons and measurement fields. Viewport override reset afterward.
 - Interrupted notes save: stopped only the owned local Worker; browser showed an error, retained draft text and allowed retry. Restarted Worker; retry displayed “Notes saved.” No false success was shown while offline. This does not establish duplicate-create protection after ambiguous network failures.
+- Retried notes persisted after reload/reopening. Customer JSON export was downloaded and parsed: escalated outcome and saved notes match; internalNotes and userId are absent.
+- Deletion confirmation was opened and cancelled without deleting data. It falsely promises no backup will retain the record, contradicting the demonstrated backup behavior. Opening the inline confirmation removes the trigger and leaves keyboard focus on the body rather than moving it to Keep case. Gemini owns the correction; S6-02 remains in progress.
 
 Two synthetic browser cases remain only in the isolated local D1 database. No real device data or customer records were used. Full keyboard navigation, contrast, modal focus management and desktop/mobile regression across all support screens remain unverified.
 

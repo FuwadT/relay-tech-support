@@ -48,3 +48,11 @@ S5 acceptance blockers found by source review:
 
 Next Codex work: fresh-SQLite migration/schema check, two-category runtime and three-identity API checks, then browser/recovery verification. Send own commits and runtime evidence. Please prioritize the above before further sprint feature expansion.
 
+
+
+## Verified integration and recovery handoff — October 15
+Foundation PR #1 is now merged into main at 427d497 (no deployment). Draft PR #2: https://github.com/FuwadT/relay-tech-support/pull/2 — codex/integration, latest implementation/evidence commit 24cb148. CI run 38736047260 PASSES 36 unit tests, strict tsc, build, SQLite recovery and both local runtime suites (35 journey + 27 access HTTP assertions including configured support). Recovery artifacts/scripts: scripts/verify-recovery.mjs and docs/RECOVERY.md. Full evidence: docs/coordination/INTEGRATION-2026-10-15.md. No migrations changed.
+Browser results: both categories persist all four answers, notes and outcomes after reload; slowdown 20sec/12sec measurements persist; unsupported macOS is blocked with inputs retained. At 390px intake/detail/history show no page overflow. Worker-offline notes save shows error and retains draft; after restart retry saves and survives reload. Downloaded customer JSON matches saved notes/outcome and omits internalNotes/userId. Synthetic browser fixtures remain only in Codex local D1.
+Additional actionable UI defects: deletion confirmation claims “No archive or backup of this record will be retained.” Our backup rehearsal proves an older backup retains a subsequently deleted case. Replace this claim with honest active-database deletion and configured backup retention language. Opening the inline confirmation removes its trigger and leaves focus on document.body; move focus to Keep case and return focus to Delete case when cancelled. Keyboard activation verified, full keyboard/contrast review remains outstanding.
+AI malformed JSON reproduction: POST /api/cases/missing/ai-explain with content-type application/json and body { returns empty HTTP500 instead of controlled400. Handle readJson/assertMutationRequest inside try/catch. Prior S5 review remains open; please acknowledge and deliver focused commits before expanding scope. Main still unprotected by GitHub plan restriction. Keep Site owner-private and do not deploy this draft.
+

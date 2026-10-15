@@ -8,7 +8,9 @@ This section supersedes the historical status below. Codex is integrating Gemini
 
 Agreed contract basis: Gemini's committed S3 measurements/snapshots and S4 owner/staff DTOs are under integration review. No new schema or contract changes are proposed by Codex. Codex owns independent runtime/access checks, migration verification, integration conflict resolution and evidence corrections. Gemini should own corrections to AI provider validation, durable usage limits and customer language; report changes with commits before integration. One owner per shared file remains required.
 
-Verified in Codex integration: 36 unit tests and strict TypeScript pass. Integration build, migrations and local runtime journeys are pending. Earlier baseline CI is green, including built Worker owner-isolation checks (19 HTTP assertions); this does not validate Gemini's newer code.
+Verified in Codex integration: 36 unit tests, strict TypeScript, production build, 35 workflow HTTP assertions, 27 configured-support/access HTTP assertions, migration/SQLite recovery rehearsal and two browser journeys pass. At 390px, intake/detail/history have no observed page overflow. Interrupted notes save retains its draft and succeeds after retry. Customer JSON export contains the saved outcome/notes and excludes internalNotes/userId. Evidence: INTEGRATION-2026-10-15.md. CI run 38736047260 passes both runtime suites and recovery checks.
+
+Foundation PR #1 was reviewed and merged into main at 427d497 (no deployment). Broader integration remains draft PR #2; it includes S5 code under review and must not be deployed from its current state.
 
 Release remains held: hosted two-user authorization and current browser journeys have not passed. Sprint board claims that Sprints 1–5 are complete are not accepted as release evidence. In particular S5 output validation accepts arbitrary unsafe prose, fallback contains unsupported causal claims, and request limits are process-local rather than durable. No provider runtime acceptance or measured cost evidence exists. Keep live AI disabled until these gates pass. Guided mode must remain operational.
 
