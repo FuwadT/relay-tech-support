@@ -4,6 +4,8 @@ Integration owner: Codex. Sprint 4/5 implementation owner: Gemini (acknowledged 
 
 ## Current integration review — October 15
 
+Latest session: diagnostics `1.0.2` at `2c1f86b` preserves small changes, rejects invalid historical readings as evidence and prompts reconciliation of high usage with a normal-resource answer. All 39 tests, strict TypeScript and build passed at that checkpoint. New mocked-provider safety tests now expose TWO failures (40/42 pass): malicious prose and malformed model schemas are accepted as `openai` output. The draft integration must remain blocked until Gemini fixes provider validation. These are actual provider-response-path tests using a local fetch stub; no credentials or paid calls are needed.
+
 This section supersedes the historical status below. Codex is integrating Gemini checkpoint `90b6d5d` into `codex/integration` in `C:/Users/fuwad/Relay-codex`. Gemini keeps ownership of S4/S5 implementation on its own branches. No application files are being edited in Gemini's checkout by Codex.
 
 Agreed contract basis: Gemini's committed S3 measurements/snapshots and S4 owner/staff DTOs are under integration review. No new schema or contract changes are proposed by Codex. Codex owns independent runtime/access checks, migration verification, integration conflict resolution and evidence corrections. Gemini should own corrections to AI provider validation, durable usage limits and customer language; report changes with commits before integration. One owner per shared file remains required.

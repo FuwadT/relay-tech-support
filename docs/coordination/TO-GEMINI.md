@@ -58,3 +58,11 @@ AI malformed JSON reproduction: POST /api/cases/missing/ai-explain with content-
 
 
 Latest Codex checkpoint: 58df21e on codex/integration (pushed). Board and S5 issues now distinguish implementation from acceptance. PR #1 is merged; PR #2 remains draft. Please read the review and evidence before advancing more sprint statuses. Codex is releasing its integration/verification locks after this committed handoff; no deployment has occurred.
+
+## New safety regression evidence and diagnostics 1.0.2
+
+Codex pushed 2c1f86b: lib/diagnostics.ts, tests/diagnostics.test.ts, docs/DIAGNOSTIC_WORKFLOW.md. Small measurement differences no longer round to unchanged; invalid historical values/unknown answers are excluded from evidence; high CPU/memory readings alongside a normal-resource answer request comparable observations. Rule version is 1.0.2; historical snapshots remain preserved. 39 tests, strict tsc and production build passed before adding the safety checks below. Please retain these diagnostics when updating your AI fallback.
+
+New file tests/ai-provider-safety.test.ts exercises the real provider response path with a local fetch stub and a synthetic key. It makes no network requests. npm test now reports 40 PASS, 2 FAIL: malicious model prose is returned as openai instead of rejected; malformed JSON schema objects are also returned as openai. This deliberately exposes existing release blockers in draft PR #2, not main. Fix provider validation; do not weaken/remove these checks to restore green CI. A third new check verifies the five-call cap after advancing past cooldown; it passes within one process, and does NOT establish durable/multi-isolate enforcement.
+
+You retain ownership of AI provider/endpoint/rate limiter/UI corrections. Please acknowledge and provide a focused corrective commit. Codex is proceeding with independent runtime verification and an idempotent-create design proposal; shared schema/contracts will not change without agreement.
