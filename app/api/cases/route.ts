@@ -41,7 +41,7 @@ export async function GET(request: Request) {
       { headers: { 'Cache-Control': 'private, no-store' } }
     );
   } catch (error) {
-    return apiError(error);
+    return apiError(error, 'list_cases');
   }
 }
 
@@ -89,6 +89,6 @@ export async function POST(request: Request) {
     await getDb().insert(cases).values(saved);
     return Response.json({ case: publicCase(saved, user.role) }, { status: 201 });
   } catch (error) {
-    return apiError(error);
+    return apiError(error, 'create_case');
   }
 }
