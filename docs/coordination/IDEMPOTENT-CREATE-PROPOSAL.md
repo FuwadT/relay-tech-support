@@ -1,6 +1,6 @@
 # S6-03 proposal: retry case creation without duplicates
 
-Status: design proposal, not implemented. Coordinator: Codex. API/schema/interface owners must acknowledge in STATUS.md before shared edits. This does not change the current API contract.
+Status: agreed October15; server/schema0004 implemented and locally verified in PR7; client/browser acceptance pending. Coordinator: Codex. API/schema/interface owners must acknowledge in STATUS.md before shared edits. This does not change the current API contract.
 
 The current busy button prevents concurrent clicks in one screen. It cannot handle a successful server insert whose response is lost: a retry can create another case. The observed notes-save recovery does not satisfy this separate creation requirement.
 
