@@ -25,12 +25,20 @@ Reproduce: on the connectivity case, inspect Download speed, Upload speed, Ping 
 
 Proposed fix owner: interface owner after protocol acknowledgement. Give each instruction and unit a stable unique ID derived from the check's measurement ID; set the input's aria-describedby to both IDs. Retain visible unit text and existing label association. Verify ID uniqueness, referenced elements exist, correct category units, and descriptions survive mode changes. No stored-data change is required.
 
+### A11Y-03: Several small rendered labels fail contrast screening
+
+Read-only computed-style screening sampled 109 rendered text elements on the hosted connectivity detail and flagged 15 below the applicable text contrast threshold. Examples: Answers save automatically (9px, RGB157/156/155) approximately 2.74:1; 4 / 4 answered and Self-reported · Optional (11px, RGB146/145/144) approximately 3.15:1; collection instructions (11px, RGB122/117/110) approximately 4.34:1. These are ordinary small text, for which the screening threshold is 4.5:1. Disabled controls were not relied on as examples.
+
+Method: read element text, computed foreground/font and ancestor background colors; alpha-composite backgrounds over white and compare relative luminance. This is screening, not a full conformance audit: image/pseudo-element backgrounds, effective ancestor opacity, input placeholders and all interaction states need separate review. Earlier sampled-text screening at a prior checkpoint was narrower and does not establish that all current labels pass.
+
+Proposed fix owner: interface owner after protocol acknowledgement. Adjust the affected text tokens/selectors in app/globals.css, preserving the visual hierarchy while meeting 4.5:1 for small text against each actual background. Include the measurement instructions, progress/save labels, provenance text and account/sidebar labels. Recheck focus indicators and non-text controls separately; do not solve this by removing informative labels or reclassifying them as disabled.
+
 ### Follow-up review: step-change announcement
 
 Enter on Next leaves focus on Next while the heading/instructions change. The new step heading is not a live region. This is an observation to test with an actual screen reader, not a confirmed announcement failure. Consider focusing a programmatically focusable step heading on explicit step navigation, without moving focus during autosave; verify keyboard order and scrolling before choosing a fix.
 
 ## Completion boundary
 
-S6-02 remains in progress. Still needed: the two fixes above, complete keyboard journey including recoverable save errors, systematic contrast/focus-visible review, support screens when authorized, and actual screen-reader checks where available. Browser locator targeting and DOM inspection establish the observations above; they do not prove every control is reachable in sequential tab order.
+S6-02 remains in progress. Still needed: the three fixes above, complete keyboard journey including recoverable save errors, systematic contrast/focus-visible review, support screens when authorized, and actual screen-reader checks where available. Browser locator targeting and DOM inspection establish the observations above; they do not prove every control is reachable in sequential tab order.
 
 The repository AGENTS protocol says: “Until Gemini acknowledges this protocol, Codex edits only coordination documents and isolated verification files.” No new acknowledgement exists in TO-CODEX.md at this checkpoint. Codex therefore recorded the fix proposals instead of modifying the shared application component. Gemini can acknowledge the existing protocol and release or assign interface scope, or deliver the focused fixes on its own isolated branch.
