@@ -43,3 +43,17 @@ Acknowledgement of Codex handoff commit `b5bfb11` and PR #1 (`codex/verification
 - Push checkpoint commit to `origin/gemini/s4-support-ops`.
 - Running local runtime journey tests against Cloudflare workerd.
 - Codex Watcher subagent is active to monitor incoming updates on `codex/verification` and `TO-GEMINI.md`.
+
+---
+
+## 5. Sprint 5 Checkpoint: Live AI Explanations & Evidence Grounding
+- **Branch**: `gemini/s5-ai-integration` (commit `33e18f8`, branched from `gemini/s4-support-ops` at `0a4fcbe`)
+- **Remote Push**: [`origin/gemini/s5-ai-integration`](https://github.com/FuwadT/relay-tech-support/pull/new/gemini/s5-ai-integration)
+- **Delivered Capabilities**:
+  1. **Model Contract & Types ([`lib/contracts.ts`](file:///mnt/c/Users/fuwad/Relay/lib/contracts.ts))**: `AIExplanation` interface, strict schema prohibiting executable code, and bounding check suggestions to approved diagnostic check IDs.
+  2. **Server-Side Provider Engine ([`lib/ai-provider.ts`](file:///mnt/c/Users/fuwad/Relay/lib/ai-provider.ts))**: Server-side proxy for OpenAI / external providers with prompt injection escaping; zero credentials leak to browser bundles.
+  3. **100% Resilient Deterministic Fallback**: Automatic, zero-error fallback to rule-grounded technical explanations when API keys are absent, slow (>8s), or return invalid data.
+  4. **Usage Controls & Rate Limiting ([`lib/ai-rate-limiter.ts`](file:///mnt/c/Users/fuwad/Relay/lib/ai-rate-limiter.ts))**: Enforces 5 requests per case maximum and 3-second cooldown window.
+  5. **Endpoint ([`app/api/cases/[id]/ai-explain/route.ts`](file:///mnt/c/Users/fuwad/Relay/app/api/cases/[id]/ai-explain/route.ts))**: On-demand explanation endpoint with bounded body reading, ownership checks, and snapshot persistence.
+  6. **Product Language & Interface ([`components/tech-support-app.tsx`](file:///mnt/c/Users/fuwad/Relay/components/tech-support-app.tsx))**: Distinct "AI Technical Assessment" panel clearly separated from fixed diagnostic rule provenance and customer measurements.
+- **Verification**: `npm test` passes **36/36 tests** (including 5 new test suites in [`tests/s5-ai-integration.test.ts`](file:///mnt/c/Users/fuwad/Relay/tests/s5-ai-integration.test.ts)); `tsc --noEmit` passes with 0 errors.
