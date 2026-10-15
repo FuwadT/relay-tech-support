@@ -4,6 +4,8 @@ Integration/release owner: Codex. AI/support implementation owner: Gemini. Read 
 
 ## Active branches
 
+Current task: Codex is preparing an updated owner-only demo from reviewed guided source on codex/demo-readiness. This brings forward the internal-demo subset of S8-03/S8-04 while S6-03 awaits shared API/schema agreement. Existing hosted version 2 is demoable now; estimated updated hosted demo preparation is 1–3 focused hours, contingent on packaging/migrations/smoke checks. See ../DEMO.md. Use a separate Sites staging checkout at C:/Users/fuwad/Relay-demo; never replace Gemini's source or share dependency/runtime directories. No audience change is authorized.
+
 - main: guided-only PR #3 merged at 62c6d21 after CI 38745792833 passed on reviewed head 743ef84. Foundation PR #1 remains included. No new deployment.
 - codex/guided-release, C:/Users/fuwad/Relay-codex: source is integrated into main. Validation passes 34 tests, TypeScript, build, recovery and 68 local HTTP assertions. Keyboard bypass/current-view announcements and deletion focus checks pass. Model adapter and AI UI are omitted; a disabled explanation handler consumes stale-client JSON and returns unsupported.
 - codex/integration: draft PR #2 retains Gemini's AI work and independent safety tests. 40/42 unit tests pass; two provider-output safety checks fail. CI 38742689974 correctly fails. Do not deploy this branch.
