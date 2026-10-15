@@ -1,4 +1,4 @@
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 import type { Analysis, Answers, CaseMeasurements, CaseStatus, Category } from '../lib/contracts';
 
 export const cases = sqliteTable('support_cases', {
@@ -25,3 +25,13 @@ export const cases = sqliteTable('support_cases', {
   updatedAt: text('updated_at').notNull(),
   verifiedAt: text('verified_at'),
 }, (table)=>[index('support_cases_owner_updated').on(table.userId,table.updatedAt)]);
+
+// Deliberately has no case foreign key: deletion must retain the retry tombstone.
+// Prototype metadata has no automatic expiry; review account retention before external release.
+export const caseCreateRequests = sqliteTable('case_create_requests', {
+  ownerId: text('owner_id').notNull(),
+  keyHash: text('key_hash').notNull(),
+  payloadHash: text('payload_hash').notNull(),
+  caseId: text('case_id').notNull(),
+  createdAt: text('created_at').notNull(),
+}, (table) => [primaryKey({ columns: [table.ownerId, table.keyHash] })]);
