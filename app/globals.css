@@ -315,3 +315,143 @@ input,select,textarea{border-radius:4px;color:#292724;border-color:#d3cec5;font-
   margin-bottom: 12px;
 }
 
+
+/* Sprint 5 — Live AI Explanations & Evidence Grounding */
+.ai-panel {
+  margin-top: 24px;
+  border-top: 1px solid #ede9e3;
+  padding-top: 22px;
+}
+
+.ai-header-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  background: #f0e6ff;
+  color: #5c2d91;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.ai-notice-box {
+  background: #fbf9f6;
+  border: 1px solid #ebd8b7;
+  border-left: 3px solid #b37400;
+  border-radius: 4px;
+  padding: 10px 14px;
+  font-size: 11px;
+  color: #73510d;
+  line-height: 1.5;
+  margin-top: 12px;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.ai-summary-callout {
+  background: #fbfaf8;
+  border: 1px solid #e8e4dc;
+  border-radius: 4px;
+  padding: 14px 16px;
+  font-size: 13px;
+  color: #312e2b;
+  line-height: 1.6;
+  margin-top: 14px;
+}
+
+.ai-causes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.ai-cause-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: #fff;
+  border: 1px solid #eae6df;
+  border-radius: 4px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #383430;
+}
+
+.ai-cause-item svg {
+  color: #a44526;
+  margin-top: 2px;
+}
+
+.ai-checks-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.ai-check-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #f3efe8;
+  border: 1px solid #ded8cb;
+  border-radius: 4px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #4b443c;
+  cursor: pointer;
+}
+
+.ai-check-chip:hover {
+  background: #e9e3d8;
+}
+
+.ai-cautions-box {
+  background: #fef7f6;
+  border: 1px solid #fae1dd;
+  border-radius: 4px;
+  padding: 12px 14px;
+  margin-top: 14px;
+}
+
+.ai-cautions-box h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: #9b3726;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ai-cautions-box ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 11px;
+  color: #7b4339;
+  line-height: 1.6;
+}
+
+.ai-metadata-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #f0ece5;
+  font-size: 11px;
+  color: #8c857b;
+}
+
+.ai-action-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+}

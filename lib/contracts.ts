@@ -127,6 +127,24 @@ export interface DiagnosticCheck {
   options: { value: string; label: string }[];
 }
 
+export type AIExplanationProvider =
+  | 'openai'
+  | 'anthropic'
+  | 'gemini'
+  | 'deterministic-fallback'
+  | 'simulated';
+
+export interface AIExplanation {
+  summary: string;
+  likelyCauses: string[];
+  recommendedCheckIds: string[];
+  cautions: string[];
+  evidenceUsed: string[];
+  provider: AIExplanationProvider;
+  latencyMs: number;
+  generatedAt: string;
+}
+
 export interface Analysis {
   headline: string;
   summary: string;
@@ -136,4 +154,6 @@ export interface Analysis {
   ruleVersion: string;
   evidenceUsed: string[];
   comparisons?: MeasurementComparison[];
+  aiExplanation?: AIExplanation | null;
 }
+

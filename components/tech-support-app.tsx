@@ -20,12 +20,14 @@ import {
   Search,
   ShieldAlert,
   ShieldCheck,
+  Sparkles,
   Trash2,
   User,
   Wifi,
   X,
 } from 'lucide-react';
 import type {
+  AIExplanation,
   Answers,
   CaseMeasurements,
   CaseRecord,
@@ -114,8 +116,42 @@ export default function TechSupportApp({ displayName }: { displayName: string })
   const [queueCategory, setQueueCategory] = useState('all');
   const [queueStatus, setQueueStatus] = useState('all');
 
+  // AI Explanation State (Sprint 5)
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiRemaining, setAiRemaining] = useState<number | null>(null);
+  const [aiError, setAiError] = useState('');
+
   const generation = useRef(0);
   const previousView = useRef<'cases' | 'queue'>('cases');
+
+  async function requestAIExplanation() {
+    if (!selected || aiBusy) return;
+    setAiBusy(true);
+    setAiError('');
+    setError('');
+    try {
+      const data = await request<{
+        ok: boolean;
+        aiExplanation: AIExplanation;
+        analysisSnapshot: import('@/lib/contracts').Analysis;
+        remaining: number;
+      }>(`/api/cases/${selected.id}/ai-explain`, {
+        method: 'POST',
+      });
+      const updatedCase: CaseRecord = {
+        ...selected,
+        analysisSnapshot: data.analysisSnapshot,
+      };
+      setSelected(updatedCase);
+      updateRecord(updatedCase);
+      setAiRemaining(data.remaining);
+      setNotice('AI technical explanation generated and saved to case.');
+    } catch (e) {
+      setAiError((e as Error).message);
+    } finally {
+      setAiBusy(false);
+    }
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -1310,6 +1346,115 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                           <p key={l}>{l}</p>
                         ))}
                       </div>
+                    </div>
+                  </section>
+
+                  {/* Task S5-07: AI Technical Assessment (Distinguished from Guided Rules) */}
+                  <section className="panel ai-panel">
+                    <div className="section-heading">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Sparkles size={18} style={{ color: '#6d28d9' }} />
+                        <h2>AI Technical Assessment</h2>
+                      </div>
+                      {analysis.aiExplanation && (
+                        <span className="ai-header-badge">
+                          {analysis.aiExplanation.provider === 'openai' ? 'OpenAI Engine' : 'Guarded Fallback Engine'}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="ai-notice-box" role="note">
+                      <ShieldAlert size={16} />
+                      <div>
+                        <strong>Automated Analysis Boundary:</strong> AI provides technical explanations grounded strictly in your reported answers and measured metrics. It cannot execute scripts, alter system configurations, or guarantee hardware health.
+                      </div>
+                    </div>
+
+                    {aiError && (
+                      <div className="alert error" style={{ marginTop: 12 }}>
+                        <ShieldAlert size={16} />
+                        {aiError}
+                      </div>
+                    )}
+
+                    {analysis.aiExplanation ? (
+                      <>
+                        <div className="ai-summary-callout">
+                          <strong>Assessment Summary:</strong> {analysis.aiExplanation.summary}
+                        </div>
+
+                        <h3 style={{ marginTop: 18, fontSize: 13 }}>Likely Technical Root Causes</h3>
+                        <div className="ai-causes-list">
+                          {analysis.aiExplanation.likelyCauses.map((cause, idx) => (
+                            <div className="ai-cause-item" key={idx}>
+                              <CircleHelp size={15} />
+                              <span>{cause}</span>
+                            </div>
+                          ))}
+                        </div>
+
+                        <h3 style={{ marginTop: 18, fontSize: 13 }}>Recommended Focus Areas</h3>
+                        <p className="muted" style={{ marginTop: 4, marginBottom: 8 }}>
+                          The model recommends paying close attention to these approved diagnostic checks:
+                        </p>
+                        <div className="ai-checks-row">
+                          {analysis.aiExplanation.recommendedCheckIds.map((checkId) => {
+                            const checkObj = checks.find((c) => c.id === checkId);
+                            return (
+                              <button
+                                type="button"
+                                key={checkId}
+                                className="ai-check-chip"
+                                onClick={() => {
+                                  const idx = checks.findIndex((c) => c.id === checkId);
+                                  if (idx !== -1) setStep(idx);
+                                }}
+                              >
+                                <Check size={13} />
+                                {checkObj ? checkObj.title : checkId}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {analysis.aiExplanation.cautions.length > 0 && (
+                          <div className="ai-cautions-box">
+                            <h4>
+                              <ShieldAlert size={14} /> Safety Cautions
+                            </h4>
+                            <ul>
+                              {analysis.aiExplanation.cautions.map((caution, idx) => (
+                                <li key={idx}>{caution}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        <div className="ai-metadata-footer">
+                          <span>
+                            {analysis.aiExplanation.evidenceUsed.length} evidence factors grounded · Latency: {analysis.aiExplanation.latencyMs}ms
+                          </span>
+                          <span>Generated {date(analysis.aiExplanation.generatedAt)}</span>
+                        </div>
+                      </>
+                    ) : (
+                      <p style={{ marginTop: 14, fontSize: 13, color: '#65635f' }}>
+                        No AI technical assessment has been generated for this case yet. Click below to analyze your reported observations and measurements.
+                      </p>
+                    )}
+
+                    <div className="ai-action-bar">
+                      <button
+                        className="button primary"
+                        disabled={aiBusy || busy}
+                        onClick={() => void requestAIExplanation()}
+                      >
+                        {aiBusy ? <Loader2 size={16} className="spin" /> : <Sparkles size={16} />}
+                        {analysis.aiExplanation ? 'Refresh AI Assessment' : 'Generate AI Assessment'}
+                      </button>
+                      <span style={{ fontSize: 11, color: '#888278' }}>
+                        {aiRemaining !== null ? `${aiRemaining} requests remaining` : '5 requests per case budget'}
+                      </span>
                     </div>
                   </section>
                 </div>
