@@ -175,7 +175,8 @@ test('cross-origin, oversized, unsupported or identity-bearing enterprise mutati
   const f = await fixture();
   try {
     for (const body of [{ ...input, deviceAuthorization: false }, { ...input, storageConsent: false }, { ...input, platform: ['windows'] },
-      { ...input, requesterId: 'tech' }, { ...input, role: 'administrator' }, { ...input, description: 'x'.repeat(4001) }]) {
+      { ...input, requesterId: 'tech' }, { ...input, role: 'administrator' }, { ...input, description: 'x'.repeat(4001) },
+      { ...input, title: 'Synthetic\u0000case' }, { ...input, description: 'Synthetic\u0000case description' }]) {
       assert.equal((await f.request(undefined, { method: 'POST', key: crypto.randomUUID(), body })).status, 400);
     }
     assert.equal((await f.request(undefined, { method: 'POST', body: input })).status, 400);

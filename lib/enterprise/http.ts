@@ -44,6 +44,10 @@ export function validateEnterpriseCase(input: unknown): ValidationResult<Enterpr
     || typeof value.description !== 'string' || value.description.trim().length < 10 || value.description.trim().length > 4000) {
     return { ok: false, error: 'Title must be 3–120 characters and description 10–4,000 characters.' };
   }
+  if (/[\u0000-\u001f\u007f]/u.test(value.title)
+    || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value.description)) {
+    return { ok: false, error: 'Remove unsupported control characters from case details.' };
+  }
   if (typeof value.platform !== 'string' || !['windows', 'macos', 'ubuntu'].includes(value.platform)) return { ok: false, error: 'Select a supported device platform.' };
   if (value.deviceAuthorization !== true || value.storageConsent !== true) {
     return { ok: false, error: 'Confirm device authorization and storage consent.' };
