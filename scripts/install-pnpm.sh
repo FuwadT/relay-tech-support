@@ -33,6 +33,8 @@ if [[ -n "${SITES_PNPM_BIN:-}" && -f "${SITES_PNPM_BIN}" && -r "${SITES_PNPM_BIN
 elif [[ "${require_shared}" == 1 ]]; then
   echo "[sites] the image-pinned pnpm is unavailable" >&2
   exit 69
+elif command -v pnpm >/dev/null && [[ "$(pnpm --version 2>/dev/null)" == "11.25.0" ]]; then
+  pnpm_command=(pnpm)
 elif command -v corepack >/dev/null; then
   # Corepack honors the established project's pin even when PATH has a different
   # pnpm version. A bare pnpm is used only if Corepack is absent, then verified.

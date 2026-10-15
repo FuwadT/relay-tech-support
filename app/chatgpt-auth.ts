@@ -1,15 +1,19 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import type { UserRole } from "../lib/contracts";
 
 export type ChatGPTUser = {
   userId: string;
   displayName: string;
   email: string;
   fullName: string | null;
+  role: UserRole;
 };
 
 const USER_ID_HEADER = "oai-authenticated-user-id";
 const USER_EMAIL_HEADER = "oai-authenticated-user-email";
+const USER_ROLE_HEADER = "oai-authenticated-user-role";
+const RELAY_ROLE_HEADER = "x-relay-role";
 const USER_FULL_NAME_HEADER = "oai-authenticated-user-full-name";
 const USER_FULL_NAME_ENCODING_HEADER =
   "oai-authenticated-user-full-name-encoding";
@@ -18,11 +22,32 @@ const SIGN_IN_PATH = "/signin-with-chatgpt";
 const SIGN_OUT_PATH = "/signout-with-chatgpt";
 const CALLBACK_PATH = "/callback";
 
-export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
-  const requestHeaders = await headers();
+/**
+ * Server-controlled role resolution.
+ * Roles are strictly authoritative from server configuration/allowlists.
+ * Client cookies, client-supplied role headers, and query parameters are NEVER trusted.
+ */
+export function resolveRole(email: string): UserRole {
+  // Authoritative server-controlled allowlist.
+  // Defaults strictly to an empty allowlist unless explicitly configured via RELAY_SUPPORT_EMAILS.
+  const staffConfig = process.env.RELAY_SUPPORT_EMAILS ?? '';
+  const staffList = staffConfig.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+  const normalizedEmail = email.trim().toLowerCase();
+
+  if (staffList.includes(normalizedEmail)) {
+    return 'support';
+  }
+  return 'customer';
+}
+
+export async function getChatGPTUser(req?: Request): Promise<ChatGPTUser | null> {
+  const requestHeaders = req ? req.headers : await headers();
+
   const userId = requestHeaders.get(USER_ID_HEADER);
   const email = requestHeaders.get(USER_EMAIL_HEADER);
   if (!userId || !email) return null;
+
+  const role = resolveRole(email);
 
   const encodedFullName = requestHeaders.get(USER_FULL_NAME_HEADER);
   const fullName =
@@ -36,6 +61,7 @@ export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
     displayName: fullName ?? email,
     email,
     fullName,
+    role,
   };
 }
 

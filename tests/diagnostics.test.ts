@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { analyzeCase, getChecks } from '../lib/diagnostics';
+import {
+  DIAGNOSTIC_RULE_VERSION,
+  analyzeCase,
+  caseAnalysis,
+  compareMeasurements,
+  getChecks,
+  getMeasurementDefinitions,
+} from '../lib/diagnostics';
 import { assertMutationRequest, readJson, validateIntake, validatePatch } from '../lib/validation';
+
 const valid={title:'Wi-Fi keeps dropping',description:'Calls freeze every afternoon on my laptop.',deviceName:'Home laptop',category:'network',os:'windows11',ownership:'personal',consent:true};
 test('supported intake and bounded strings',()=> {assert.equal(validateIntake(valid).category,'network');assert.throws(()=>validateIntake({...valid,title:'x'.repeat(121)}));assert.equal(validateIntake({...valid,description:'x'.repeat(2000)}).description.length,2000);assert.throws(()=>validateIntake({...valid,description:'x'.repeat(2001)}));});
 test('consent, unsupported OS, and work devices rejected',()=>{for(const patch of [{consent:false},{consent:'true'},{os:'macos'},{ownership:'work'}])assert.throws(()=>validateIntake({...valid,...patch}));});
@@ -14,3 +22,72 @@ test('performance observations preserve uncertainty and no automated repair clai
 test('all categories have four distinct supported checks',()=>{for(const category of ['network','performance'] as const){const checks=getChecks(category);assert.equal(checks.length,4);assert.equal(new Set(checks.map(c=>c.id)).size,4);}});
 test('same-origin mutations accepted; cross-origin rejected',()=>{assertMutationRequest(new Request('https://example.com/api/cases',{headers:{origin:'https://example.com'}}));assert.throws(()=>assertMutationRequest(new Request('https://example.com/api/cases',{headers:{origin:'https://evil.example'}})));});
 test('JSON parser rejects unsupported content types and oversized requests',async()=>{await assert.rejects(()=>readJson(new Request('https://example.com',{method:'POST',body:'{}'})));await assert.rejects(()=>readJson(new Request('https://example.com',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({a:'x'.repeat(24000)})})));assert.deepEqual(await readJson(new Request('https://example.com',{method:'POST',headers:{'content-type':'application/json'},body:'{"ok":true}'})),{ok:true});});
+test('S3-01 measurement definitions are well-defined with units and instructions',()=>{
+  for(const cat of ['network','performance'] as const){
+    const defs = getMeasurementDefinitions(cat);
+    assert.equal(defs.length, 4);
+    for (const d of defs) {
+      assert.ok(d.id);
+      assert.ok(d.label);
+      assert.ok(d.unit);
+      assert.ok(d.instruction);
+    }
+  }
+});
+test('S3-04 compareMeasurements evaluates improvement and preserves missing as incomplete',()=>{
+  const defs = getMeasurementDefinitions('performance');
+  assert.equal(defs.length, 4);
+  for (const d of defs) { assert.ok(d.unit); assert.ok(d.instruction); }
+  const comps = compareMeasurements('performance', {
+    baseline: { app_launch_seconds: 20, cpu_percent: 85, memory_percent: null },
+    followUp: { app_launch_seconds: 5, cpu_percent: 95, memory_percent: 70 }
+  });
+  const launch = comps.find((c) => c.id === 'app_launch_seconds');
+  assert.equal(launch?.direction, 'improved');
+  assert.equal(launch?.difference, -15);
+  const cpu = comps.find((c) => c.id === 'cpu_percent');
+  assert.equal(cpu?.direction, 'worsened');
+  const mem = comps.find((c) => c.id === 'memory_percent');
+  assert.equal(mem?.direction, 'incomplete');
+  assert.equal(mem?.baseline, null);
+});
+test('S3-05 rule provenance records version and evidenceUsed',()=>{
+  const a = analyzeCase({
+    category: 'performance',
+    answers: { scope: 'one_app', resources: 'cpu' },
+    measurements: { baseline: { app_launch_seconds: 12 } }
+  });
+  assert.equal(a.ruleVersion, DIAGNOSTIC_RULE_VERSION);
+  assert.ok(a.evidenceUsed.includes('scope:one_app'));
+  assert.ok(a.evidenceUsed.includes('resources:cpu'));
+  assert.ok(a.evidenceUsed.includes('baseline_app_launch_seconds:12'));
+});
+test('S3-06 contradictory and ambiguous evidence prompts notice',()=>{
+  const wiredAll = analyzeCase({
+    category: 'network',
+    answers: { connection: 'wired', scope: 'all_devices' }
+  });
+  assert.match(wiredAll.findings.join(' '), /does not establish/);
+  assert.match(wiredAll.nextSteps.join(' '), /same time/);
+  assert.doesNotMatch(wiredAll.findings.join(' '), /strongly indicates/);
+});
+test('validatePatch validates structured measurements and rejects bounds violations',()=>{
+  const valid = validatePatch({ measurements: { baseline: { download_mbps: 150.5 } } }, 'network');
+  assert.equal(valid.measurements?.baseline?.download_mbps, 150.5);
+  assert.throws(() => validatePatch({ measurements: { baseline: { download_mbps: -5 } } }, 'network'));
+  assert.throws(() => validatePatch({ measurements: { baseline: { unknown_key: 10 } } }, 'network'));
+  assert.throws(() => validatePatch({ measurements: { baseline: { download_mbps: 'fast' as unknown as number } } }, 'network'));
+});
+
+test('historical analysis is returned unchanged even when current rules differ',()=>{
+  const snapshot = {...analyzeCase({category:'network',answers:{}}), ruleVersion:'historical-fixture', findings:['Previously saved finding']};
+  const record = {category:'network',answers:{scope:'all_devices'},analysisSnapshot:snapshot} as unknown as import('../lib/contracts').CaseRecord;
+  assert.deepEqual(caseAnalysis(record),snapshot);
+  assert.equal(caseAnalysis({...record,analysisSnapshot:null}).ruleVersion,DIAGNOSTIC_RULE_VERSION);
+});
+
+test('ordinary readings do not justify unsupported thermal or power diagnoses',()=>{
+  const result=analyzeCase({category:'performance',answers:{scope:'whole_device',resources:'normal',storage:'enough'}});
+  assert.match(result.findings.join(' '),/do not identify a cause/);
+  assert.doesNotMatch(result.nextSteps.join(' '),/Best Performance|thermal|indexing/);
+});

@@ -1,5 +1,6 @@
 import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
-import type { Answers, CaseStatus, Category } from '../lib/contracts';
+import type { Analysis, Answers, CaseMeasurements, CaseStatus, Category } from '../lib/contracts';
+
 export const cases = sqliteTable('support_cases', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull(),
@@ -11,7 +12,13 @@ export const cases = sqliteTable('support_cases', {
   ownership: text('ownership').$type<'personal'>().notNull(),
   status: text('status').$type<CaseStatus>().notNull().default('open'),
   answers: text('answers', {mode:'json'}).$type<Answers>().notNull(),
+  measurements: text('measurements', {mode:'json'}).$type<CaseMeasurements>(),
+  ruleVersion: text('rule_version').notNull().default('1.0.0'),
+  analysisSnapshot: text('analysis_snapshot', {mode:'json'}).$type<Analysis>(),
   notes: text('notes').notNull().default(''),
+  internalNotes: text('internal_notes').notNull().default(''),
+  assignedTo: text('assigned_to'),
+  escalatedAt: text('escalated_at'),
   consent: integer('consent', {mode:'boolean'}).notNull(),
   consentAt: text('consent_at').notNull(),
   createdAt: text('created_at').notNull(),

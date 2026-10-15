@@ -1,5 +1,78 @@
-import type { Analysis, CaseRecord, Category, DiagnosticCheck } from './contracts';
+import type { Analysis, CaseMeasurements, CaseRecord, Category, DiagnosticCheck, MeasurementComparison, MeasurementDefinition } from './contracts';
+
+export const DIAGNOSTIC_RULE_VERSION = '1.0.1';
+
+// Old cases without a snapshot are explicitly evaluated using current rules.
+export function caseAnalysis(record: CaseRecord): Analysis {
+  return record.analysisSnapshot ?? analyzeCase(record);
+}
+
 const unknown = { value: 'unknown', label: 'Not sure / unable to check' };
+
+export const measurementDefinitions: Record<Category, MeasurementDefinition[]> = {
+  performance: [
+    { id: 'app_launch_seconds', label: 'App launch time', unit: 'sec', instruction: 'Time how long your most frequently used app takes to fully open and become responsive.', min: 0, max: 600 },
+    { id: 'cpu_percent', label: 'CPU utilization', unit: '%', instruction: 'In Task Manager (Ctrl+Shift+Esc), check overall CPU percentage during normal use.', min: 0, max: 100 },
+    { id: 'memory_percent', label: 'Memory utilization', unit: '%', instruction: 'In Task Manager, check overall Memory percentage during normal use.', min: 0, max: 100 },
+    { id: 'free_storage_gb', label: 'System drive free space', unit: 'GB', instruction: 'In Settings → System → Storage, record free gigabytes remaining on Drive C:.', min: 0, max: 50000 },
+  ],
+  network: [
+    { id: 'download_mbps', label: 'Download speed', unit: 'Mbps', instruction: 'Run an internet speed test (e.g. speedtest.net or fast.com) and record download speed.', min: 0, max: 10000 },
+    { id: 'upload_mbps', label: 'Upload speed', unit: 'Mbps', instruction: 'Record the upload speed from the same test.', min: 0, max: 10000 },
+    { id: 'ping_latency_ms', label: 'Ping latency', unit: 'ms', instruction: 'Record the unloaded latency or ping time in milliseconds.', min: 0, max: 5000 },
+    { id: 'wifi_bars', label: 'Wi-Fi signal strength', unit: 'bars', instruction: 'Count how many bars are illuminated on the Windows taskbar Wi-Fi icon.', min: 1, max: 4 },
+  ],
+};
+
+export function getMeasurementDefinitions(category: Category): MeasurementDefinition[] {
+  return measurementDefinitions[category];
+}
+
+export function compareMeasurements(category: Category, measurements?: CaseMeasurements): MeasurementComparison[] {
+  const defs = getMeasurementDefinitions(category);
+  const baseline = measurements?.baseline ?? {};
+  const followUp = measurements?.followUp ?? {};
+
+  return defs.map(def => {
+    const bVal = (typeof baseline[def.id] === 'number') ? baseline[def.id] : null;
+    const fVal = (typeof followUp[def.id] === 'number') ? followUp[def.id] : null;
+
+    if (bVal === null || fVal === null) {
+      return {
+        id: def.id,
+        label: def.label,
+        unit: def.unit,
+        baseline: bVal,
+        followUp: fVal,
+        difference: null,
+        direction: 'incomplete',
+      };
+    }
+
+    const diff = Number((fVal - bVal).toFixed(1));
+    let direction: 'improved' | 'worsened' | 'unchanged' = 'unchanged';
+    const lowerIsBetter = ['app_launch_seconds', 'cpu_percent', 'memory_percent', 'ping_latency_ms'].includes(def.id);
+
+    if (diff === 0) {
+      direction = 'unchanged';
+    } else if (lowerIsBetter) {
+      direction = diff < 0 ? 'improved' : 'worsened';
+    } else {
+      direction = diff > 0 ? 'improved' : 'worsened';
+    }
+
+    return {
+      id: def.id,
+      label: def.label,
+      unit: def.unit,
+      baseline: bVal,
+      followUp: fVal,
+      difference: diff,
+      direction,
+    };
+  });
+}
+
 const checks: Record<Category, DiagnosticCheck[]> = {
   performance: [
     { id: 'scope', title: 'Where does the slowdown happen?', instruction: 'Compare an ordinary browser tab with another app you already use. Do not install anything.', reason: 'This separates an app-specific symptom from a broader device problem.', options: [{value:'one_app',label:'Only one app'}, {value:'whole_device',label:'Across several apps'}, unknown] },
@@ -15,25 +88,73 @@ const checks: Record<Category, DiagnosticCheck[]> = {
   ],
 };
 export function getChecks(category: Category): DiagnosticCheck[] { return checks[category]; }
-export function analyzeCase(record: Pick<CaseRecord, 'category' | 'answers'>): Analysis {
+export function analyzeCase(record: Pick<CaseRecord, 'category' | 'answers'> & { measurements?: CaseMeasurements; ruleVersion?: string }): Analysis {
   const a = record.answers;
   const findings: string[] = [];
   const nextSteps: string[] = [];
+  const evidenceUsed: string[] = [];
+
+  for (const [k, v] of Object.entries(a)) {
+    if (v && !['unknown', 'not_tried'].includes(v)) {
+      evidenceUsed.push(`${k}:${v}`);
+    }
+  }
+
+  if (record.measurements?.baseline) {
+    for (const [k, v] of Object.entries(record.measurements.baseline)) {
+      if (typeof v === 'number') evidenceUsed.push(`baseline_${k}:${v}`);
+    }
+  }
+  if (record.measurements?.followUp) {
+    for (const [k, v] of Object.entries(record.measurements.followUp)) {
+      if (typeof v === 'number') evidenceUsed.push(`followup_${k}:${v}`);
+    }
+  }
+
   if (record.category === 'performance') {
     if (a.scope === 'one_app') { findings.push('You reported that the slowdown is limited to one app.'); nextSteps.push('Check that app’s official support and update guidance; compare with the same task in another app if possible.'); }
     if (['cpu','memory','disk'].includes(a.resources)) { findings.push(`You observed sustained high ${a.resources === 'cpu' ? 'CPU' : a.resources} usage during the symptom.`); nextSteps.push('Record the name of the busiest recognizable app in Task Manager and repeat the observation. Do not stop unfamiliar system processes.'); }
     if (a.storage === 'low') { findings.push('You reported less than about 10% free space on the system drive.'); nextSteps.push('Review Windows Storage recommendations and back up important files before considering any cleanup.'); }
     if (a.restart === 'better') { findings.push('You reported improvement after a restart; this does not establish the original cause.'); nextSteps.push('Repeat the same activity later and record whether the symptom returns before marking the case resolved.'); }
     if (a.restart === 'same') nextSteps.push('If the symptom persists, share this case with a trusted technician or the device manufacturer.');
+
+    // Contradictory / ambiguous checks (S3-06)
+    if (a.scope === 'whole_device' && a.resources === 'normal' && a.storage === 'enough') {
+      findings.push('You reported device-wide slowdown without sustained high resource usage or low storage. These observations do not identify a cause.');
+      nextSteps.push('Repeat the same activity while the slowdown is happening and record its duration and Task Manager readings. If it persists, share the observations with a trusted technician.');
+    }
   } else {
     if (a.scope === 'all_devices') { findings.push('You reported that multiple devices on the same Wi-Fi are affected.'); nextSteps.push('Check your provider’s official outage information and share the cross-device result with their support team.'); }
     if (a.scope === 'one_device') { findings.push('You reported that only this computer is affected.'); nextSteps.push('Record whether this computer behaves differently on another trusted network, if one is available.'); }
     if (a.connection === 'better_near') { findings.push('You reported improvement closer to the router, consistent with a possible Wi-Fi coverage or interference issue.'); nextSteps.push('Use a safe location with a clearer path to the router and repeat the same task before considering new hardware.'); }
     if (a.activity === 'better_paused') { findings.push('You reported improvement when background network activity was paused.'); nextSteps.push('Schedule your own downloads or backups outside calls and compare performance again.'); }
     if (a.reach === 'one_service') { findings.push('You reported that the problem is limited to one service.'); nextSteps.push('Check that service’s official status and support guidance before changing network settings.'); }
+
+    // Contradictory / ambiguous checks (S3-06)
+    if (a.connection === 'wired' && a.scope === 'all_devices') {
+      findings.push('You reported multiple affected devices and Ethernet on this computer. This does not establish that the devices failed at the same time or identify a router or provider fault.');
+      nextSteps.push('Compare the same two unrelated services on both devices at the same time. Record which connections and services fail before drawing a network-wide conclusion.');
+    }
   }
+
   const completed = getChecks(record.category).filter(c => a[c.id] && !['unknown','not_tried'].includes(a[c.id])).length;
   if (!findings.length) findings.push(completed ? 'The observations provided do not yet point to a specific explanation.' : 'No conclusive observations have been recorded yet.');
   if (!nextSteps.length) nextSteps.push('Complete the remaining checks and record a repeatable example. Escalate to a trusted technician if the issue continues.');
-  return { headline: completed ? 'Your evidence, organized' : 'Start with a few observations', summary:`${completed} of ${getChecks(record.category).length} checks have usable observations. These suggestions come from fixed diagnostic rules.`, findings, nextSteps, limitations:['Results use your reported observations; this app cannot inspect your device or verify a repair.','These are possible explanations and next steps, not a confirmed root cause or an AI-generated diagnosis.'] };
+
+  const comparisons = compareMeasurements(record.category, record.measurements);
+
+  return {
+    headline: completed ? 'Your evidence, organized' : 'Start with a few observations',
+    summary: `${completed} of ${getChecks(record.category).length} checks have usable observations. These suggestions come from fixed diagnostic rules.`,
+    findings,
+    nextSteps,
+    limitations: [
+      'Results use your reported observations; this app cannot inspect your device or verify a repair.',
+      'These are possible explanations and next steps, not a confirmed root cause or an AI-generated diagnosis.',
+      'Outcome comparisons display self-reported values and do not prove that an action caused the change.'
+    ],
+    ruleVersion: DIAGNOSTIC_RULE_VERSION,
+    evidenceUsed,
+    comparisons
+  };
 }
