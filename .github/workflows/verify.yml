@@ -47,3 +47,5 @@ jobs:
           node tests/runtime-access.mjs
           node tests/runtime.mjs
           node tests/runtime-idempotency.mjs
+      - name: Verify isolated enterprise Worker and D1 foundation
+        run: node tests/enterprise-runtime.mjs
