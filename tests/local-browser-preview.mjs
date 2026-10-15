@@ -7,7 +7,8 @@ if (upstream.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(upstre
 }
 const port = 8790;
 const origin = `http://127.0.0.1:${port}`;
-const fixtureId = `browser-fixture-${crypto.randomUUID()}`;
+const fixtureId = process.env.RELAY_TEST_BROWSER_OWNER_ID ?? `browser-fixture-${crypto.randomUUID()}`;
+if (!/^browser-fixture-[a-zA-Z0-9-]{1,100}$/.test(fixtureId)) throw new Error('Synthetic browser fixture ID required.');
 let loseCreateResponse = process.env.RELAY_TEST_LOSE_CREATE_RESPONSE_ONCE === '1';
 http.createServer((incoming, outgoing) => {
   if (incoming.headers.host !== `127.0.0.1:${port}` ||

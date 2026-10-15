@@ -137,6 +137,11 @@ export default function TechSupportApp({ displayName }: { displayName: string })
   const [dataAsOf, setDataAsOf] = useState<string | null>(null);
   const [queueReady, setQueueReady] = useState(false);
   const [queueAsOf, setQueueAsOf] = useState<string | null>(null);
+  const retryTrigger = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (view === 'new' && submission && !busy) retryTrigger.current?.focus();
+  }, [view, submission, busy]);
 
   function cancelDelete() {
     restoreDeleteFocus.current = true;
@@ -1094,7 +1099,7 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                 <form className="panel intake" onSubmit={create}>
                   {draftRestored && <p role="status">Restored your unfinished draft from this browser tab.</p>}
                   {draftWarning && <p role="status">{draftWarning}</p>}
-                  {submission && <div className="alert" role="status"><p>An earlier save may have succeeded. Retry the same saved request to recover its case; the submitted details are locked.</p><button type="button" className="button secondary" disabled={busy} onClick={() => void create()}>Retry same save</button></div>}
+                  {submission && <div className="alert" role="status"><p>An earlier save may have succeeded. Retry the same saved request to recover its case; the submitted details are locked.</p><button ref={retryTrigger} type="button" className="button secondary" disabled={busy} onClick={() => void create()}>Retry same save</button></div>}
                   {(draftRestored || submission || draftBlocked) && <button type="button" className="button secondary" disabled={busy} onClick={discardDraft}>Discard draft and start a new attempt</button>}
                   <fieldset disabled={busy || !!submission || draftBlocked || !currentUser || draftOwnerId !== currentUser.userId}>
                     <legend className="field-title">What needs attention?</legend>
