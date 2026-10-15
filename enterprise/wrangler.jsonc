@@ -3,7 +3,7 @@
   // are required before production. Never reuse the Sites DB or identity headers.
   "name": "relay-enterprise-foundation",
   "main": "worker.ts",
-  "compatibility_date": "2026-10-01",
+  "compatibility_date": "2026-05-22",
   "workers_dev": false,
   "vars": { "APP_ORIGIN": "http://127.0.0.1:8800" },
   "d1_databases": [{
