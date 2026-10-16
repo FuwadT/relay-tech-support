@@ -143,6 +143,23 @@ describe('E6-01: Structured AI Output Safety Boundary', () => {
 });
 
 describe('E6-01: Provider Controls, Allowlists, and Deterministic Fallback', () => {
+  it('does not recommend retired actions on any platform or infer health from missing findings', () => {
+    for (const platform of ['windows', 'macos', 'ubuntu'] as const) {
+      for (const id of ['disk-free-low', 'dns-unsuccessful']) {
+        const result = buildDeterministicFallback({ ...mockRequest, platform,
+          findings: [{ ...mockRequest.findings[0], id }] }, 'Guided mode');
+        assert.equal(result.output.selectedCatalogActionId, null);
+      }
+      const empty = buildDeterministicFallback({ ...mockRequest, platform, findings: [] }, 'Guided mode');
+      assert.equal(empty.output.selectedCatalogActionId, null);
+      assert.match(empty.output.technicalSummary, /does not establish device health/);
+    }
+    for (const platform of ['macos', 'ubuntu'] as const) {
+      const result = buildDeterministicFallback({ ...mockRequest, platform,
+        findings: [{ ...mockRequest.findings[0], id: 'cpu-high' }] }, 'Guided mode');
+      assert.equal(result.output.selectedCatalogActionId, null);
+    }
+  });
   it('falls back deterministically when AI is disabled by organization admin', async () => {
     const config: AIProviderConfig = {
       provider: 'anthropic',

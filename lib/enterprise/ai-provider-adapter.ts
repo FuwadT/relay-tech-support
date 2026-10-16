@@ -168,9 +168,15 @@ export function buildDeterministicFallback(
     }
   }
 
+  // A catalog retirement must also stop deterministic recommendations. Target
+  // identity and proposal validation are still required before rendering a script.
+  if (selectedCatalogActionId && !getCatalogAction(selectedCatalogActionId, request.platform)) {
+    selectedCatalogActionId = null;
+  }
+
   const technicalSummary = request.findings.length > 0
     ? `Deterministic analysis based on ${request.findings.length} evidence-linked observation(s). Causation remains unconfirmed.`
-    : 'Deterministic analysis: Telemetry readings are within normal review thresholds. Ongoing monitoring recommended.';
+    : 'No evidence-linked findings are available. This does not establish device health; collect the relevant observations before drawing a conclusion.';
 
   return {
     provider,
