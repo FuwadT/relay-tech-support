@@ -12,13 +12,10 @@
  * - Fix 7: Safe inline Markdown parser rendering **bold** and `code` tokens
  */
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   ArrowDownToLine,
   Check,
-  CheckCircle2,
-  ChevronDown,
-  ChevronUp,
   ClipboardPaste,
   Copy,
   Cpu,
@@ -26,12 +23,10 @@ import {
   Laptop,
   Lock,
   Monitor,
-  Network,
   RotateCw,
   ShieldCheck,
   Sparkles,
   Terminal,
-  UploadCloud,
   Wifi,
 } from 'lucide-react';
 import type {
@@ -161,11 +156,18 @@ interface DeductiveBranch {
 
 function getDeductiveBranch(prompt: string): DeductiveBranch {
   const p = prompt.toLowerCase();
-  if (p.includes('cpu') || p.includes('fan') || p.includes('heat') || p.includes('freeze') || p.includes('sluggish') || p.includes('slow')) {
+  if (p.includes('fan') || p.includes('heat') || p.includes('warm') || p.includes('overheat') || p.includes('noise')) {
     return {
       category: 'cpu',
       question: 'Does the fan noise and freezing happen right when you open a specific app (like your browser or video call), or even when idle?',
       quickReplies: ['While using browser', 'During video calls', 'Even when idle', 'Run system check now'],
+    };
+  }
+  if (p.includes('portal') || p.includes('cache') || p.includes('cookie') || p.includes('permission') || p.includes('site')) {
+    return {
+      category: 'portal_cache',
+      question: 'Is the portal displaying a specific error (like 403 Forbidden or 502 Bad Gateway), or is the page content visually blank or stuck loading?',
+      quickReplies: ['Page blank or stuck loading', 'Permission / 403 Forbidden', 'Authentication loop', 'Run instant browser check'],
     };
   }
   if (p.includes('wifi') || p.includes('wi-fi') || p.includes('network') || p.includes('internet') || p.includes('dns') || p.includes('offline') || p.includes('gateway')) {
@@ -182,14 +184,14 @@ function getDeductiveBranch(prompt: string): DeductiveBranch {
       quickReplies: ['Yes, disk full warning', 'System is just slow', 'Run disk check now'],
     };
   }
-  if (p.includes('cache') || p.includes('cookie') || p.includes('glitch') || p.includes('refresh') || p.includes('browser')) {
+  if (p.includes('sluggish') || p.includes('slow') || p.includes('freeze') || p.includes('lag')) {
     return {
-      category: 'browser',
-      question: 'Are you experiencing this display glitch in one specific website, or across your entire browser session?',
-      quickReplies: ['One specific website', 'All web pages', 'Browser keeps freezing', 'Run system check now'],
+      category: 'slowness',
+      question: 'Does this slowness occur primarily inside your web browser / a specific web app, or is the entire workstation sluggish even when idle?',
+      quickReplies: ['In web browser / portal', 'Specific desktop app', 'Entire computer is sluggish', 'Run instant browser check'],
     };
   }
-  if (p.includes('mic') || p.includes('camera') || p.includes('permission') || p.includes('sound') || p.includes('audio')) {
+  if (p.includes('mic') || p.includes('camera') || p.includes('sound') || p.includes('audio')) {
     return {
       category: 'permission',
       question: 'Does the microphone or camera fail in all desktop applications, or only inside your web browser / video meeting?',
@@ -205,9 +207,17 @@ function getDeductiveBranch(prompt: string): DeductiveBranch {
 
 function getZeroInstallSteps(answer: string, category: string): string[] {
   const a = answer.toLowerCase();
+  if (a.includes('portal') || a.includes('cache') || a.includes('permission') || a.includes('cookie') || category === 'portal_cache') {
+    return [
+      'Click the site settings / padlock icon (🔒 or ⚙️) directly beside the portal URL in your address bar.',
+      'Select "Site settings" (or "Permissions"), then click "Clear data" and "Reset permissions" to wipe corrupted localized caches.',
+      'Press Ctrl + Shift + Delete (Cmd + Shift + Delete on macOS), choose "Cached images and files", and clear data.',
+      'Test loading the portal in an Incognito / Private window (Ctrl + Shift + N) to rule out extension conflicts or hung Service Workers.',
+    ];
+  }
   if (a.includes('browser')) {
     return [
-      'Open Browser Task Manager (Shift + Esc) to see which tab or extension is consuming high CPU.',
+      'Open Browser Task Manager (Shift + Esc) to see which tab or extension is consuming high CPU or memory.',
       'Clear browser cache and cached images for sluggish sites.',
       'Disable heavy extensions (adblockers, script injectors) and test in an Incognito / Private window.',
     ];
@@ -348,13 +358,15 @@ export function EnterpriseChatView({
   ]);
 
   const [inputPrompt, setInputPrompt] = useState('');
-  const [selectedPlatform, setSelectedPlatform] = useState<DevicePlatform>('windows');
+  const [selectedPlatform, setSelectedPlatform] = useState<DevicePlatform>(() =>
+    typeof window !== 'undefined' ? detectClientPlatform() : 'windows'
+  );
   const [deviceAuthorized, setDeviceAuthorized] = useState(false);
   const [storageConsent, setStorageConsent] = useState(false);
   const [activeCase, setActiveCase] = useState<EnterpriseCase | null>(null);
   const [activeSnapshot, setActiveSnapshot] = useState<TelemetrySnapshot | null>(null);
   const [activeFindings, setActiveFindings] = useState<EvidenceFinding[]>([]);
-  const [activeRemediation, setActiveRemediation] = useState<RemediationProposal | null>(null);
+  const [, setActiveRemediation] = useState<RemediationProposal | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const [caseSaving, setCaseSaving] = useState(false);
 
@@ -364,8 +376,39 @@ export function EnterpriseChatView({
   const [pasteTelemetryOpen, setPasteTelemetryOpen] = useState(false);
   const [pastedTelemetryText, setPastedTelemetryText] = useState('');
   const [pasteError, setPasteError] = useState('');
-  const [currentOrigin, setCurrentOrigin] = useState('http://127.0.0.1:8790');
+  const [currentOrigin] = useState(() =>
+    typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:8790'
+  );
   const [isRunningProbe, setIsRunningProbe] = useState(false);
+
+  // AI Provider Integration State
+  const [aiProvider, setAiProvider] = useState<'gemini' | 'openai'>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('relay_ai_provider') as 'gemini' | 'openai') || 'gemini';
+    }
+    return 'gemini';
+  });
+  const [aiApiKey, setAiApiKey] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('relay_ai_api_key') || '';
+    }
+    return '';
+  });
+  const [aiModel, setAiModel] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('relay_ai_model') || 'gemini-2.0-flash';
+    }
+    return 'gemini-2.0-flash';
+  });
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [tempApiKey, setTempApiKey] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('relay_ai_api_key') || '';
+    }
+    return '';
+  });
+  const [saveStatus, setSaveStatus] = useState<string>('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -444,41 +487,27 @@ export function EnterpriseChatView({
     }
   };
 
-  // Auto-detect client workstation OS on mount (Fix 6)
-  useEffect(() => {
+  const handleSaveAISettings = () => {
     if (typeof window !== 'undefined') {
-      setCurrentOrigin(window.location.origin);
-      const detected = detectClientPlatform();
-      setSelectedPlatform(detected);
+      const cleanKey = tempApiKey.trim();
+      localStorage.setItem('relay_ai_api_key', cleanKey);
+      localStorage.setItem('relay_ai_provider', aiProvider);
+      localStorage.setItem('relay_ai_model', aiModel);
+      setAiApiKey(cleanKey);
+      setSaveStatus('AI Settings Saved Successfully!');
+      setTimeout(() => {
+        setSaveStatus('');
+        setShowSettingsModal(false);
+      }, 700);
     }
-  }, []);
+  };
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, pendingQuickReplies]);
 
-  // Background polling for direct script callback upload (Fix 4)
-  useEffect(() => {
-    if (stage !== 'awaiting_telemetry' || !activeCase?.id) return;
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/cases/${activeCase.id}/telemetry`);
-        if (res.ok) {
-          const data = (await res.json()) as { ok?: boolean; telemetry?: TelemetrySnapshot };
-          if (data?.ok && data?.telemetry) {
-            ingestSnapshot(data.telemetry);
-          }
-        }
-      } catch {
-        // Ignore polling errors while script runs
-      }
-    }, 2500);
-
-    return () => clearInterval(interval);
-  }, [stage, activeCase?.id]);
-
   // Ingests a validated telemetry snapshot and displays symptom-aware findings (Fix 1, 5)
-  const ingestSnapshot = (snapshot: TelemetrySnapshot) => {
+  const ingestSnapshot = useCallback((snapshot: TelemetrySnapshot) => {
     setActiveSnapshot(snapshot);
     const findings = analyzeEnterpriseTelemetry(snapshot);
     setActiveFindings(findings);
@@ -522,9 +551,29 @@ export function EnterpriseChatView({
         remediation: remediation || undefined,
       },
     ]);
-  };
+  }, [reportedSymptomCategory]);
 
-  const handleSendMessage = (textToSend?: string) => {
+  // Background polling for direct script callback upload (Fix 4)
+  useEffect(() => {
+    if (stage !== 'awaiting_telemetry' || !activeCase?.id) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/cases/${activeCase.id}/telemetry`);
+        if (res.ok) {
+          const data = (await res.json()) as { ok?: boolean; telemetry?: TelemetrySnapshot };
+          if (data?.ok && data?.telemetry) {
+            ingestSnapshot(data.telemetry);
+          }
+        }
+      } catch {
+        // Ignore polling errors while script runs
+      }
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [stage, activeCase?.id, ingestSnapshot]);
+
+  const handleSendMessage = async (textToSend?: string) => {
     const text = (textToSend || inputPrompt).trim();
     if (!text) return;
 
@@ -552,6 +601,101 @@ export function EnterpriseChatView({
       return;
     }
 
+    if (
+      lower.includes('run system check') ||
+      lower.includes('check now') ||
+      lower.includes('telemetry') ||
+      lower.includes('script') ||
+      lower.includes('deep check') ||
+      lower.includes('deep system check')
+    ) {
+      setPendingQuickReplies([]);
+      setStage('awaiting_authorization');
+      setTimeout(() => {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            sender: 'assistant',
+            text: `Understood. Let’s proceed to a non-elevated diagnostic inspection to pinpoint the issue. Please authorize your device below:`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            cardType: 'device-auth',
+          },
+        ]);
+      }, 300);
+      return;
+    }
+
+    // Call live AI Triage endpoint (/api/ai/triage)
+    setIsGenerating(true);
+    try {
+      const response = await fetch('/api/ai/triage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          stage,
+          userMessage: text,
+          conversationHistory: messages.map((m) => ({ sender: m.sender, text: m.text })),
+          platform: selectedPlatform,
+          snapshot: activeSnapshot,
+          findings: activeFindings,
+          providerConfig: {
+            provider: aiProvider,
+            apiKey: aiApiKey,
+            model: aiModel,
+          },
+        }),
+      });
+
+      if (response.ok) {
+        const json = (await response.json()) as {
+          ok?: boolean;
+          data?: {
+            stage?: string;
+            quickReplies?: string[];
+            recommendedAction?: string;
+            reply?: string;
+            hypotheses?: Array<{
+              id: string;
+              domain: string;
+              summary: string;
+              confidence: number;
+              status: string;
+            }>;
+            addressedSymptomMismatch?: boolean;
+          };
+        };
+        if (json.ok && json.data) {
+          const aiResponse = json.data;
+          setStage(aiResponse.stage as TriageStage);
+          setPendingQuickReplies(aiResponse.quickReplies || []);
+
+          const cardType =
+            aiResponse.recommendedAction === 'request_os_collector'
+              ? 'device-auth'
+              : undefined;
+
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              sender: 'assistant',
+              text: aiResponse.reply,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              cardType,
+            },
+          ]);
+          setIsGenerating(false);
+          return;
+        }
+      }
+    } catch {
+      // Fall through to deterministic fallback if network or endpoint fails
+    } finally {
+      setIsGenerating(false);
+    }
+
+    // Deterministic fallback pipeline
     // STAGE 1: intake_discovery -> Deductive Questioning (Fix 2)
     if (stage === 'intake_discovery') {
       const branch = getDeductiveBranch(text);
@@ -575,25 +719,6 @@ export function EnterpriseChatView({
 
     // STAGE 2: deductive_questioning -> Zero-Install or Authorization (Fix 2)
     if (stage === 'deductive_questioning') {
-      const lower = text.toLowerCase();
-      if (lower.includes('run system check') || lower.includes('check now') || lower.includes('telemetry') || lower.includes('script')) {
-        setPendingQuickReplies([]);
-        setStage('awaiting_authorization');
-        setTimeout(() => {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: crypto.randomUUID(),
-              sender: 'assistant',
-              text: `Understood. Let’s proceed to a non-elevated diagnostic inspection to pinpoint the issue. Please authorize your device below:`,
-              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              cardType: 'device-auth',
-            },
-          ]);
-        }, 400);
-        return;
-      }
-
       setPendingQuickReplies([]);
       const steps = getZeroInstallSteps(text, reportedSymptomCategory);
       setTimeout(() => {
@@ -841,6 +966,27 @@ export function EnterpriseChatView({
           <span className="text-muted text-sm">Non-Elevated · Zero-Install Resolution First · Evidence-Linked</span>
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button
+            type="button"
+            onClick={() => {
+              setTempApiKey(aiApiKey);
+              setShowSettingsModal(true);
+            }}
+            className="button secondary btn-sm"
+            title="Configure AI Provider & API Key"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              border: aiApiKey ? '1px solid #10b981' : '1px solid #f59e0b',
+              background: aiApiKey ? 'rgba(16, 185, 129, 0.08)' : 'rgba(245, 158, 11, 0.08)',
+              color: aiApiKey ? '#059669' : '#d97706',
+              fontWeight: 600,
+            }}
+          >
+            <Sparkles size={14} />
+            <span>{aiApiKey ? `${aiProvider === 'gemini' ? 'Gemini AI' : 'OpenAI'} Active` : 'Connect AI Key'}</span>
+          </button>
           {onSwitchToManualForm && (
             <button onClick={onSwitchToManualForm} className="button secondary btn-sm">
               Switch to manual form
@@ -1358,6 +1504,26 @@ export function EnterpriseChatView({
           </div>
         )}
 
+        {/* Generating indicator */}
+        {isGenerating && (
+          <div className="chat-bubble-row assistant">
+            <div className="chat-bubble assistant" style={{ fontStyle: 'italic', opacity: 0.9 }}>
+              <div className="bubble-header">
+                <span className="sender-name">Relay Assistant</span>
+                <span className="timestamp">Thinking...</span>
+              </div>
+              <div className="bubble-text" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <RotateCw size={14} className="animate-spin" />
+                <span>
+                  {aiApiKey
+                    ? `Generating diagnosis with ${aiProvider === 'gemini' ? 'Google Gemini' : 'OpenAI'}...`
+                    : 'Analyzing diagnostic inquiry...'}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div ref={messagesEndRef} />
       </div>
 
@@ -1386,6 +1552,181 @@ export function EnterpriseChatView({
           </button>
         </form>
       </footer>
+
+      {/* AI Settings Modal */}
+      {showSettingsModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.55)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '16px',
+          }}
+          onClick={() => setShowSettingsModal(false)}
+        >
+          <div
+            style={{
+              backgroundColor: '#ffffff',
+              borderRadius: '12px',
+              padding: '24px',
+              maxWidth: '480px',
+              width: '100%',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+              color: '#1f2937',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Sparkles size={20} color="#f59e0b" />
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>AI Provider Settings</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSettingsModal(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '18px',
+                  cursor: 'pointer',
+                  color: '#6b7280',
+                  padding: '4px',
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <p style={{ fontSize: '13px', color: '#4b5563', marginBottom: '16px', lineHeight: 1.5 }}>
+              Connect a real Generative AI model so Relay Assistant can answer complex questions, give exact step-by-step instructions (e.g. clearing localized web portal cache & permissions), and eliminate canned responses.
+            </p>
+
+            <div style={{ marginBottom: '14px' }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px', color: '#374151' }}>
+                AI Model Provider
+              </label>
+              <select
+                value={aiProvider}
+                onChange={(e) => {
+                  const p = e.target.value as 'gemini' | 'openai';
+                  setAiProvider(p);
+                  if (p === 'gemini') setAiModel('gemini-2.0-flash');
+                  else setAiModel('gpt-4o-mini');
+                }}
+                style={{
+                  width: '100%',
+                  padding: '8px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid #d1d5db',
+                  fontSize: '14px',
+                  backgroundColor: '#f9fafb',
+                  color: '#111827',
+                }}
+              >
+                <option value="gemini">Google Gemini (Recommended — Gemini 2.0 Flash)</option>
+                <option value="openai">OpenAI (GPT-4o / GPT-4o-mini)</option>
+              </select>
+            </div>
+
+            <div style={{ marginBottom: '14px' }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px', color: '#374151' }}>
+                Model
+              </label>
+              {aiProvider === 'gemini' ? (
+                <select
+                  value={aiModel}
+                  onChange={(e) => setAiModel(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    borderRadius: '6px',
+                    border: '1px solid #d1d5db',
+                    fontSize: '14px',
+                    backgroundColor: '#f9fafb',
+                    color: '#111827',
+                  }}
+                >
+                  <option value="gemini-2.0-flash">gemini-2.0-flash (Fastest & Most Accurate)</option>
+                  <option value="gemini-1.5-flash">gemini-1.5-flash (Standard)</option>
+                  <option value="gemini-1.5-pro">gemini-1.5-pro (High Reasoning)</option>
+                </select>
+              ) : (
+                <select
+                  value={aiModel}
+                  onChange={(e) => setAiModel(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    borderRadius: '6px',
+                    border: '1px solid #d1d5db',
+                    fontSize: '14px',
+                    backgroundColor: '#f9fafb',
+                    color: '#111827',
+                  }}
+                >
+                  <option value="gpt-4o-mini">gpt-4o-mini (Fast & Cost-Effective)</option>
+                  <option value="gpt-4o">gpt-4o (Full Capability)</option>
+                </select>
+              )}
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                <label style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>
+                  {aiProvider === 'gemini' ? 'Google AI Studio API Key' : 'OpenAI API Key'}
+                </label>
+                <span style={{ fontSize: '11px', color: '#6b7280' }}>Stored in browser session</span>
+              </div>
+              <input
+                type="password"
+                placeholder={aiProvider === 'gemini' ? 'AIzaSy...' : 'sk-...'}
+                value={tempApiKey}
+                onChange={(e) => setTempApiKey(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '8px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid #d1d5db',
+                  fontSize: '14px',
+                  backgroundColor: '#ffffff',
+                  color: '#111827',
+                  boxSizing: 'border-box',
+                }}
+              />
+              <p style={{ fontSize: '11px', color: '#6b7280', marginTop: '6px', lineHeight: 1.4 }}>
+                Key is kept in your browser local storage. You can also set <code>GEMINI_API_KEY</code> in <code>.env.local</code> on the server.
+              </p>
+            </div>
+
+            {saveStatus && (
+              <div style={{ marginBottom: '14px', color: '#059669', fontSize: '13px', fontWeight: 600 }}>
+                ✓ {saveStatus}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button
+                type="button"
+                className="button secondary btn-sm"
+                onClick={() => setShowSettingsModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="button primary btn-sm"
+                onClick={handleSaveAISettings}
+              >
+                Save & Connect
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -255,20 +255,23 @@ export function validateDeductiveTriageResponse(raw: unknown): ValidationResult<
   if (typeof obj.reply !== 'string' || !obj.reply.trim()) {
     return { ok: false, error: 'Missing or empty reply string in triage response.' };
   }
-  if (!Array.isArray(obj.quickReplies)) {
-    return { ok: false, error: 'quickReplies must be an array.' };
-  }
-  if (!Array.isArray(obj.hypotheses)) {
-    return { ok: false, error: 'hypotheses must be an array.' };
-  }
+  const quickReplies = Array.isArray(obj.quickReplies)
+    ? obj.quickReplies.filter((q): q is string => typeof q === 'string')
+    : ['Solved my issue', 'Still happening — run deep system check'];
+
+  const hypotheses = Array.isArray(obj.hypotheses)
+    ? (obj.hypotheses as TriageHypothesis[])
+    : [];
+
   return {
     ok: true,
     value: {
       stage: (obj.stage as EnterpriseTriageStage) || 'deductive_questioning',
       reply: obj.reply.trim(),
-      quickReplies: obj.quickReplies as string[],
-      hypotheses: obj.hypotheses as TriageHypothesis[],
-      recommendedAction: (obj.recommendedAction as any) || 'ask_clarifying_question',
+      quickReplies,
+      hypotheses,
+      recommendedAction:
+        (obj.recommendedAction as DeductiveTriageResponse['recommendedAction']) || 'ask_clarifying_question',
       addressedSymptomMismatch: Boolean(obj.addressedSymptomMismatch),
     },
   };
@@ -279,7 +282,7 @@ export function validateDeductiveTriageResponse(raw: unknown): ValidationResult<
  * Rules out hypotheses systematically and bridges symptom mismatches with ground-truth telemetry.
  */
 export function buildDeductiveTriage(request: DeductiveTriageRequest): DeductiveTriageResponse {
-  const { stage, userMessage, platform, snapshot, findings = [], hypotheses = [] } = request;
+  const { stage, userMessage, snapshot } = request;
   const lowerMsg = userMessage.toLowerCase().trim();
 
   // 1. Intake Discovery: Greeting and open-ended discovery
@@ -399,7 +402,9 @@ export function buildDeductiveTriage(request: DeductiveTriageRequest): Deductive
   }
 
   // 5. Deductive Questioning: Rule out fault domains with exactly ONE question
-  if (/cpu|fan|noise|heat|warm|freez|freeze|overheat/i.test(lowerMsg)) {
+
+  // Fan noise & thermal overload
+  if (/fan|noise|heat|warm|overheat/i.test(lowerMsg)) {
     return {
       stage: 'deductive_questioning',
       reply: 'High fan noise and system freezes usually indicate sustained CPU load, background indexing, or hardware acceleration failure. When this happens, does it occur while using a specific app (such as Chrome or a video call), or even when the computer is completely idle?',
@@ -419,6 +424,28 @@ export function buildDeductiveTriage(request: DeductiveTriageRequest): Deductive
     };
   }
 
+  // Web portal, browser cache, cookies, or permissions
+  if (/portal|cache|cookie|permission|site\b|webpage|website/i.test(lowerMsg)) {
+    return {
+      stage: 'deductive_questioning',
+      reply: 'Web portal loading failures and permission blocks are usually caused by stale local site cookies, outdated Service Workers, or blocked browser site permissions. Is the portal displaying a specific error (such as 403 Forbidden or 502 Bad Gateway), or is the page content visually blank or failing to authenticate?',
+      quickReplies: [
+        'Page blank or stuck loading',
+        'Permission or 403 Forbidden',
+        'Authentication loop',
+        'Run instant browser check',
+      ],
+      hypotheses: [
+        { id: 'hyp-perm', domain: 'permissions', summary: 'Site permissions or third-party cookie restrictions', confidence: 0.85, status: 'active' },
+        { id: 'hyp-app', domain: 'application', summary: 'Corrupted browser site cache or Service Worker', confidence: 0.8, status: 'active' },
+        { id: 'hyp-net', domain: 'network_dns', summary: 'Origin server connectivity failure', confidence: 0.3, status: 'active' },
+      ],
+      recommendedAction: 'ask_clarifying_question',
+      addressedSymptomMismatch: false,
+    };
+  }
+
+  // Network, Wi-Fi, DNS
   if (/wifi|wi-fi|dns|network|internet|connect|disconnect|offline|load/i.test(lowerMsg)) {
     return {
       stage: 'deductive_questioning',
@@ -439,6 +466,7 @@ export function buildDeductiveTriage(request: DeductiveTriageRequest): Deductive
     };
   }
 
+  // Disk space
   if (/disk|space|storage|drive|gigabyte|full/i.test(lowerMsg)) {
     return {
       stage: 'deductive_questioning',
@@ -453,6 +481,27 @@ export function buildDeductiveTriage(request: DeductiveTriageRequest): Deductive
         { id: 'hyp-disk', domain: 'disk_io', summary: 'Exhausted system drive or temporary file accumulation', confidence: 0.8, status: 'active' },
         { id: 'hyp-app', domain: 'application', summary: 'Unbounded application cache growth', confidence: 0.5, status: 'active' },
         { id: 'hyp-net', domain: 'network_dns', summary: 'Network connection failure', confidence: 0.1, status: 'ruled_out' },
+      ],
+      recommendedAction: 'ask_clarifying_question',
+      addressedSymptomMismatch: false,
+    };
+  }
+
+  // Slowness without fan noise
+  if (/freez|freeze|sluggish|slow|lag|unresponsive/i.test(lowerMsg)) {
+    return {
+      stage: 'deductive_questioning',
+      reply: 'To isolate what is causing the slowdown without running unneeded scripts: does this sluggishness happen primarily inside your web browser or a specific web app, or is the entire operating system lagging even when idle?',
+      quickReplies: [
+        'In web browser / portal',
+        'Specific desktop application',
+        'Entire computer lags when idle',
+        'Run instant browser check',
+      ],
+      hypotheses: [
+        { id: 'hyp-app', domain: 'application', summary: 'Application or browser memory consumption', confidence: 0.7, status: 'active' },
+        { id: 'hyp-cpu', domain: 'cpu_thermal', summary: 'General system resource constraint', confidence: 0.5, status: 'active' },
+        { id: 'hyp-net', domain: 'network_dns', summary: 'Network latency perceived as UI lag', confidence: 0.3, status: 'active' },
       ],
       recommendedAction: 'ask_clarifying_question',
       addressedSymptomMismatch: false,
@@ -478,6 +527,188 @@ export function buildDeductiveTriage(request: DeductiveTriageRequest): Deductive
   };
 }
 
+const RELAY_TRIAGE_SYSTEM_PROMPT = `You are Relay Assistant, an expert enterprise IT diagnostics and technical support assistant.
+Your goal is to help users troubleshoot and resolve workstation, operating system, application, browser, and network problems across Windows 11, macOS, and Ubuntu Linux.
+
+CRITICAL OPERATIONAL RULES:
+1. Zero-Install Resolution First: Whenever possible, provide immediate, non-invasive troubleshooting steps (e.g. browser settings, clearing site-specific cache/permissions, resetting adapters, inspecting Task Manager) before suggesting collector scripts.
+2. Socratic & Deductive: If the problem is broad or ambiguous, ask ONE focused clarifying question to isolate the fault domain.
+3. Never Hallucinate Symptoms: NEVER assume symptoms the user did not state. If the user says "my computer is slow", do NOT assume fan noise or overheating unless they mentioned it.
+4. Direct Technical Answers: If the user asks a specific question (e.g. "A web portal is failing to load properly; I need help clearing localized browser cache and permissions"), answer that question directly, accurately, and with step-by-step instructions for major browsers (Chrome/Edge/Safari/Firefox).
+5. Grounded in Telemetry: When an active Telemetry Snapshot or Browser WebAPI probe is present in the context, cite the exact numbers (e.g. CPU %, memory used, storage free, ping, GPU renderer).
+6. Safety Boundary: NEVER output raw executable code blocks that pipe curl/irm into bash/powershell, elevation commands (sudo/RunAs), or destructive scripts.
+7. Output JSON: You MUST respond strictly in valid JSON matching this schema:
+{
+  "stage": "intake_discovery" | "deductive_questioning" | "browser_probe" | "awaiting_authorization" | "awaiting_telemetry" | "active_investigation",
+  "reply": "Your markdown-formatted message to the user.",
+  "quickReplies": ["2 to 4 short, clickable suggested replies"],
+  "hypotheses": [
+    {
+      "id": "hyp-1",
+      "domain": "cpu_thermal" | "memory" | "disk_io" | "network_dns" | "application" | "permissions",
+      "summary": "Brief summary",
+      "confidence": 0.8,
+      "status": "active" | "ruled_out" | "confirmed"
+    }
+  ],
+  "recommendedAction": "ask_clarifying_question" | "run_browser_probe" | "request_os_collector" | "propose_remediation",
+  "addressedSymptomMismatch": false
+}`;
+
+async function callGeminiTriage(
+  request: DeductiveTriageRequest,
+  apiKey: string,
+  model: string = 'gemini-2.0-flash',
+  timeoutMs: number = 15000,
+): Promise<ValidationResult<DeductiveTriageResponse>> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
+
+  const contextParts: string[] = [`Workstation Platform: ${request.platform}`];
+  if (request.snapshot) {
+    contextParts.push(
+      `Active Telemetry: CPU ${request.snapshot.cpuPercent ?? 'null'}%, Memory ${request.snapshot.memoryUsedMb ?? 'null'}/${request.snapshot.memoryTotalMb ?? 'null'} MB, Disk Free ${request.snapshot.diskFreeGb ?? 'null'} GB, DNS ${request.snapshot.dnsResolved ?? 'null'}, Gateway Ping ${request.snapshot.gatewayLatencyMs ?? 'null'} ms`,
+    );
+  }
+  if (request.findings && request.findings.length > 0) {
+    contextParts.push(`Findings: ${request.findings.map((f) => f.observation).join('; ')}`);
+  }
+  const contextPrefix = `[Context: ${contextParts.join(' | ')}]`;
+
+  if (request.conversationHistory && request.conversationHistory.length > 0) {
+    for (const msg of request.conversationHistory) {
+      contents.push({
+        role: msg.sender === 'user' ? 'user' : 'model',
+        parts: [{ text: msg.text }],
+      });
+    }
+  }
+
+  if (contents.length > 0 && contents[0].role === 'model') {
+    contents.shift();
+  }
+
+  const userText = contents.length === 0 ? `${contextPrefix}\n\n${request.userMessage}` : request.userMessage;
+  contents.push({ role: 'user', parts: [{ text: userText }] });
+
+  const payload = {
+    system_instruction: { parts: [{ text: RELAY_TRIAGE_SYSTEM_PROMPT }] },
+    contents,
+    generationConfig: {
+      temperature: 0.2,
+      response_mime_type: 'application/json',
+    },
+  };
+
+  const response = await fetch(url, {
+    method: 'POST',
+    signal: AbortSignal.timeout(timeoutMs),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    return { ok: false, error: `Gemini API error (${response.status}): ${errText.slice(0, 200)}` };
+  }
+
+  interface GeminiCandidate {
+    content?: {
+      parts?: Array<{
+        text?: string;
+      }>;
+    };
+  }
+  interface GeminiApiResponse {
+    candidates?: GeminiCandidate[];
+  }
+
+  const data = (await response.json()) as GeminiApiResponse;
+  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!rawText || typeof rawText !== 'string') {
+    return { ok: false, error: 'Empty or missing content from Gemini response.' };
+  }
+
+  const cleanJson = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  try {
+    const parsed = JSON.parse(cleanJson);
+    return validateDeductiveTriageResponse(parsed);
+  } catch (parseErr) {
+    return { ok: false, error: `Failed to parse Gemini JSON output: ${String(parseErr)}` };
+  }
+}
+
+async function callOpenAITriage(
+  request: DeductiveTriageRequest,
+  apiKey: string,
+  model: string = 'gpt-4o-mini',
+  timeoutMs: number = 15000,
+): Promise<ValidationResult<DeductiveTriageResponse>> {
+  const url = 'https://api.openai.com/v1/chat/completions';
+
+  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+    { role: 'system', content: RELAY_TRIAGE_SYSTEM_PROMPT },
+  ];
+
+  if (request.conversationHistory && request.conversationHistory.length > 0) {
+    for (const msg of request.conversationHistory) {
+      messages.push({ role: msg.sender === 'user' ? 'user' : 'assistant', content: msg.text });
+    }
+  }
+
+  const contextParts: string[] = [`Workstation Platform: ${request.platform}`];
+  if (request.snapshot) {
+    contextParts.push(
+      `Active Telemetry: CPU ${request.snapshot.cpuPercent ?? 'null'}%, Memory ${request.snapshot.memoryUsedMb ?? 'null'}/${request.snapshot.memoryTotalMb ?? 'null'} MB, Disk Free ${request.snapshot.diskFreeGb ?? 'null'} GB, DNS ${request.snapshot.dnsResolved ?? 'null'}`,
+    );
+  }
+  const currentPrompt = `[Context: ${contextParts.join(' | ')}]\n\n${request.userMessage}`;
+  messages.push({ role: 'user', content: currentPrompt });
+
+  const response = await fetch(url, {
+    method: 'POST',
+    signal: AbortSignal.timeout(timeoutMs),
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages,
+      response_format: { type: 'json_object' },
+      temperature: 0.2,
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    return { ok: false, error: `OpenAI API error (${response.status}): ${errText.slice(0, 200)}` };
+  }
+
+  interface OpenAIResponseChoice {
+    message?: {
+      content?: string;
+    };
+  }
+  interface OpenAIApiResponse {
+    choices?: OpenAIResponseChoice[];
+  }
+
+  const data = (await response.json()) as OpenAIApiResponse;
+  const rawText = data?.choices?.[0]?.message?.content;
+  if (!rawText || typeof rawText !== 'string') {
+    return { ok: false, error: 'Empty or missing content from OpenAI response.' };
+  }
+
+  try {
+    const parsed = JSON.parse(rawText.trim());
+    return validateDeductiveTriageResponse(parsed);
+  } catch (parseErr) {
+    return { ok: false, error: `Failed to parse OpenAI JSON output: ${String(parseErr)}` };
+  }
+}
+
 /**
  * Executes a deductive triage step through the AI provider adapter.
  */
@@ -485,6 +716,51 @@ export async function executeDeductiveTriage(
   request: DeductiveTriageRequest,
   config?: AIProviderConfig,
 ): Promise<DeductiveTriageResponse> {
-  return buildDeductiveTriage(request);
+  const provider = config?.provider || 'gemini';
+  const apiKey =
+    config?.apiKey?.trim() ||
+    (provider === 'gemini'
+      ? process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY
+      : process.env.OPENAI_API_KEY || process.env.NEXT_PUBLIC_OPENAI_API_KEY) ||
+    '';
+  const model =
+    config?.model || (provider === 'gemini' ? 'gemini-2.0-flash' : 'gpt-4o-mini');
+
+  if (apiKey) {
+    try {
+      if (provider === 'gemini') {
+        const geminiRes = await callGeminiTriage(request, apiKey, model, config?.timeoutMs);
+        if (geminiRes.ok) {
+          return {
+            ...geminiRes.value,
+            isFallback: false,
+            providerUsed: 'gemini',
+            modelUsed: model,
+          };
+        }
+      } else if (provider === 'openai') {
+        const openaiRes = await callOpenAITriage(request, apiKey, model, config?.timeoutMs);
+        if (openaiRes.ok) {
+          return {
+            ...openaiRes.value,
+            isFallback: false,
+            providerUsed: 'openai',
+            modelUsed: model,
+          };
+        }
+      }
+    } catch {
+      // Fall through to deterministic fallback
+    }
+  }
+
+  const fallback = buildDeductiveTriage(request);
+  return {
+    ...fallback,
+    isFallback: true,
+    providerUsed: 'deterministic-rules-engine',
+    modelUsed: 'offline-rules',
+  };
 }
+
 

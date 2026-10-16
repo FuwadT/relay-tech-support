@@ -117,5 +117,8 @@ export interface DeductiveTriageResponse {
   hypotheses: TriageHypothesis[];
   recommendedAction: 'ask_clarifying_question' | 'run_browser_probe' | 'request_os_collector' | 'propose_remediation' | 'escalate';
   addressedSymptomMismatch?: boolean;
+  isFallback?: boolean;
+  providerUsed?: string;
+  modelUsed?: string;
 }
 

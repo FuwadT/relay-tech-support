@@ -6,12 +6,12 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { DevicePlatform, EvidenceFinding, TelemetrySnapshot } from '../lib/enterprise/contracts';
+import type { EvidenceFinding, TelemetrySnapshot } from '../lib/enterprise/contracts';
 import {
-  APPROVED_DIAGNOSTIC_CHECK_IDS,
   buildDeductiveTriage,
   buildDeterministicFallback,
   executeAIAnalysis,
+  executeDeductiveTriage,
   validateDeductiveTriageResponse,
   validateStructuredAIOutput,
   type AIAnalysisRequest,
@@ -269,6 +269,33 @@ describe('Phase 2: Multi-Turn Deductive Triage & Hypothesis Pruning', () => {
 
     const invalid = { reply: '' };
     assert.strictEqual(validateDeductiveTriageResponse(invalid).ok, false);
+  });
+
+  it('executeDeductiveTriage isolates web portal and cache issues without mentioning fan noise', async () => {
+    const res = await executeDeductiveTriage({
+      stage: 'deductive_questioning',
+      userMessage: 'A web portal is failing to load properly; I need help clearing localized browser cache and permissions.',
+      platform: 'windows',
+    });
+
+    assert.strictEqual(res.stage, 'deductive_questioning');
+    assert.ok(res.reply.toLowerCase().includes('portal'));
+    assert.ok(!res.reply.toLowerCase().includes('fan noise'));
+    assert.ok(res.isFallback, 'Must indicate offline fallback when no API key configured');
+    const permHyp = res.hypotheses.find((h) => h.domain === 'permissions');
+    assert.ok(permHyp && permHyp.status === 'active');
+  });
+
+  it('executeDeductiveTriage isolates general slowness without ungrounded fan noise assumptions', async () => {
+    const res = await executeDeductiveTriage({
+      stage: 'deductive_questioning',
+      userMessage: 'my computer is slow',
+      platform: 'windows',
+    });
+
+    assert.strictEqual(res.stage, 'deductive_questioning');
+    assert.ok(!res.reply.toLowerCase().includes('fan noise'));
+    assert.ok(res.quickReplies.length >= 3);
   });
 });
 

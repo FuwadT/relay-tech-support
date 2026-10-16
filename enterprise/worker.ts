@@ -3,10 +3,21 @@ import { boundedJson, EnterpriseHttpError, json, UUID, validateEnterpriseCase } 
 import { createEnterpriseCase, listEnterpriseCases, readEnterpriseCase, resolveEnterprisePrincipal } from '../lib/enterprise/store';
 import { getCollectorScript } from '../lib/enterprise/collector-scripts';
 import { validateTelemetrySnapshot } from '../lib/enterprise/telemetry-validation';
+import { executeDeductiveTriage } from '../lib/enterprise/ai-provider-adapter';
+import type {
+  DevicePlatform,
+  EnterpriseTriageStage,
+  EvidenceFinding,
+  ModelProvider,
+  TelemetrySnapshot,
+  TriageHypothesis,
+} from '../lib/enterprise/contracts';
 
 export interface EnterpriseEnvironment {
   ENTERPRISE_DB: D1Database;
   APP_ORIGIN: string;
+  GEMINI_API_KEY?: string;
+  OPENAI_API_KEY?: string;
 }
 export async function handleEnterpriseRequest(request: Request, env: EnterpriseEnvironment): Promise<Response> {
   const requestId = crypto.randomUUID();
@@ -89,6 +100,68 @@ export async function handleEnterpriseRequest(request: Request, env: EnterpriseE
       }
       return new Response(null, { status: 405, headers: { Allow: 'POST, OPTIONS' } });
     }
+
+    // Dedicated AI Triage Route
+    if (url.pathname === '/api/ai/triage') {
+      if (request.method === 'OPTIONS') {
+        return new Response(null, {
+          status: 204,
+          headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type',
+          },
+        });
+      }
+      if (request.method === 'POST') {
+        const body = (await boundedJson(request)) as {
+          userMessage?: unknown;
+          stage?: EnterpriseTriageStage;
+          conversationHistory?: Array<{ sender: 'user' | 'assistant'; text: string }>;
+          platform?: DevicePlatform;
+          snapshot?: TelemetrySnapshot | null;
+          findings?: EvidenceFinding[];
+          hypotheses?: TriageHypothesis[];
+          providerConfig?: {
+            provider?: ModelProvider;
+            apiKey?: string;
+            model?: string;
+          };
+        };
+        if (!body?.userMessage || typeof body.userMessage !== 'string') {
+          return json({ ok: false, error: 'userMessage is required.' }, 400);
+        }
+        const provider = body.providerConfig?.provider || 'gemini';
+        const apiKey =
+          body.providerConfig?.apiKey?.trim() ||
+          (provider === 'gemini'
+            ? env.GEMINI_API_KEY || (typeof process !== 'undefined' ? process.env?.GEMINI_API_KEY : '')
+            : env.OPENAI_API_KEY || (typeof process !== 'undefined' ? process.env?.OPENAI_API_KEY : '')) ||
+          '';
+
+        const result = await executeDeductiveTriage(
+          {
+            stage: body.stage || 'deductive_questioning',
+            userMessage: body.userMessage,
+            conversationHistory: body.conversationHistory || [],
+            platform: body.platform || 'windows',
+            snapshot: body.snapshot || null,
+            findings: body.findings || [],
+            hypotheses: body.hypotheses || [],
+          },
+          {
+            provider,
+            apiKey,
+            model: body.providerConfig?.model || (provider === 'gemini' ? 'gemini-2.0-flash' : 'gpt-4o-mini'),
+            modelAllowlist: ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gpt-4o', 'gpt-4o-mini'],
+            enabled: true,
+            timeoutMs: 15000,
+          }
+        );
+        return json({ ok: true, data: result }, 200);
+      }
+      return new Response(null, { status: 405, headers: { Allow: 'POST, OPTIONS' } });
+    }
     const route = /^\/api\/v2\/organizations\/([0-9a-f-]+)\/cases(?:\/([0-9a-f-]+))?$/i.exec(url.pathname);
     if (!route || !UUID.test(route[1]) || (route[2] && !UUID.test(route[2]))) throw new EnterpriseHttpError(404, 'Route not found.');
     if (url.search) throw new EnterpriseHttpError(400, 'Unexpected query parameters.');
@@ -137,4 +210,5 @@ export async function handleEnterpriseRequest(request: Request, env: EnterpriseE
     }
   }
 }
-export default { fetch: handleEnterpriseRequest };
+const enterpriseWorker = { fetch: handleEnterpriseRequest };
+export default enterpriseWorker;
