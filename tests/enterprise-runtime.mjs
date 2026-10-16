@@ -153,6 +153,56 @@ try {
   assert.equal((await call()).cases.length, 4);
   assert.equal((await call({ actor: 'peer' })).cases.length, 1);
   assert.equal((await call({ actor: 'other', organization: otherOrg })).cases.length, 1);
+
+  // Phase 2: Collector script download & telemetry callback verification
+  const collectorRes = await fetch(`${origin}/api/collectors/windows11.ps1?caseId=case-test-123&callbackUrl=http://127.0.0.1:${port}/api/cases/case-test-123/telemetry`, { signal: AbortSignal.timeout(10000) });
+  assert.equal(collectorRes.status, 200);
+  const collectorScript = await collectorRes.text();
+  assert.match(collectorScript, /\$env:RELAY_CASE_ID = "case-test-123"/);
+  assert.match(collectorScript, /\$env:RELAY_CALLBACK_URL = "http:\/\/127.0.0.1/);
+  checks++;
+
+  const mockTelemetryPayload = {
+    schemaVersion: 1,
+    collectionId: '00000000-0000-4000-8000-000000000001',
+    platform: 'windows',
+    osVersion: 'Windows 11',
+    architecture: 'x64',
+    source: 'collector',
+    collectorVersion: '1.0.0',
+    collectedAt: new Date().toISOString(),
+    sampleIntervalMs: 1000,
+    cpuPercent: 88.5,
+    memoryTotalMb: 16384,
+    memoryUsedMb: 8192,
+    diskTotalGb: 512,
+    diskFreeGb: 256,
+    dnsResolved: true,
+    gatewayLatencyMs: 12,
+    processes: [],
+    eventExcerpts: [],
+    errors: [],
+  };
+
+  const telemetryPostRes = await fetch(`${origin}/api/cases/00000000-0000-4000-8000-000000000001/telemetry`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(10000),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(mockTelemetryPayload),
+  });
+  assert.equal(telemetryPostRes.status, 200);
+  const telemetryData = await telemetryPostRes.json();
+  assert.equal(telemetryData.ok, true);
+  assert.equal(telemetryData.caseId, '00000000-0000-4000-8000-000000000001');
+  assert.equal(telemetryData.telemetry.cpuPercent, 88.5);
+  checks++;
+
+  const telemetryOptionsRes = await fetch(`${origin}/api/cases/00000000-0000-4000-8000-000000000001/telemetry`, {
+    method: 'OPTIONS',
+    signal: AbortSignal.timeout(10000),
+  });
+  assert.equal(telemetryOptionsRes.status, 204);
+  checks++;
   console.log(`PASS: ${checks} actual local workerd/D1 HTTP checks plus concurrent, rollback and owner/org assertions.`);
   console.log('Evidence uses seeded opaque sessions in a disposable local DB; hosted OIDC, deployment and real identities are not verified.');
 } catch (error) {

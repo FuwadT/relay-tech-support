@@ -13,10 +13,13 @@
  */
 
 import type {
+  DeductiveTriageResponse,
   DevicePlatform,
+  EnterpriseTriageStage,
   EvidenceFinding,
   ModelProvider,
   TelemetrySnapshot,
+  TriageHypothesis,
   ValidationResult,
 } from './contracts';
 import { getCatalogAction } from './remediation-catalog';
@@ -230,3 +233,258 @@ export async function executeAIAnalysis(
     return buildDeterministicFallback(request, `Provider call failed: ${errorMsg}`, config.provider);
   }
 }
+
+export interface DeductiveTriageRequest {
+  stage: EnterpriseTriageStage;
+  userMessage: string;
+  conversationHistory?: Array<{ sender: 'user' | 'assistant'; text: string }>;
+  platform: DevicePlatform;
+  snapshot?: TelemetrySnapshot | null;
+  findings?: EvidenceFinding[];
+  hypotheses?: TriageHypothesis[];
+}
+
+/**
+ * Validates a deductive triage response payload.
+ */
+export function validateDeductiveTriageResponse(raw: unknown): ValidationResult<DeductiveTriageResponse> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, error: 'Triage response must be a JSON object.' };
+  }
+  const obj = raw as Record<string, unknown>;
+  if (typeof obj.reply !== 'string' || !obj.reply.trim()) {
+    return { ok: false, error: 'Missing or empty reply string in triage response.' };
+  }
+  if (!Array.isArray(obj.quickReplies)) {
+    return { ok: false, error: 'quickReplies must be an array.' };
+  }
+  if (!Array.isArray(obj.hypotheses)) {
+    return { ok: false, error: 'hypotheses must be an array.' };
+  }
+  return {
+    ok: true,
+    value: {
+      stage: (obj.stage as EnterpriseTriageStage) || 'deductive_questioning',
+      reply: obj.reply.trim(),
+      quickReplies: obj.quickReplies as string[],
+      hypotheses: obj.hypotheses as TriageHypothesis[],
+      recommendedAction: (obj.recommendedAction as any) || 'ask_clarifying_question',
+      addressedSymptomMismatch: Boolean(obj.addressedSymptomMismatch),
+    },
+  };
+}
+
+/**
+ * Generates a structured multi-turn deductive triage response enforcing the Socratic One-Question Rule.
+ * Rules out hypotheses systematically and bridges symptom mismatches with ground-truth telemetry.
+ */
+export function buildDeductiveTriage(request: DeductiveTriageRequest): DeductiveTriageResponse {
+  const { stage, userMessage, platform, snapshot, findings = [], hypotheses = [] } = request;
+  const lowerMsg = userMessage.toLowerCase().trim();
+
+  // 1. Intake Discovery: Greeting and open-ended discovery
+  if (stage === 'intake_discovery' || !lowerMsg) {
+    return {
+      stage: 'deductive_questioning',
+      reply: 'Hello! What seems to be the issue you are having today? Describe what is happening in your own words, or pick a common symptom below.',
+      quickReplies: [
+        'High CPU & loud fan noise',
+        'Wi-Fi & DNS connection drops',
+        'Low disk space warning',
+        'Browser or video call lag',
+      ],
+      hypotheses: [
+        { id: 'hyp-cpu', domain: 'cpu_thermal', summary: 'Elevated CPU utilization or thermal throttling', confidence: 0.25, status: 'active' },
+        { id: 'hyp-net', domain: 'network_dns', summary: 'Local network or DNS resolution failure', confidence: 0.25, status: 'active' },
+        { id: 'hyp-disk', domain: 'disk_io', summary: 'Storage space exhaustion or disk I/O bottleneck', confidence: 0.25, status: 'active' },
+        { id: 'hyp-app', domain: 'application', summary: 'Application hang or background memory leak', confidence: 0.25, status: 'active' },
+      ],
+      recommendedAction: 'ask_clarifying_question',
+      addressedSymptomMismatch: false,
+    };
+  }
+
+  // 2. Active Investigation: Telemetry snapshot already captured; answer from snapshot
+  if (stage === 'active_investigation' && snapshot) {
+    const mentionsCpu = /cpu|fan|noise|heat|warm|freez|freeze|slow|spin/i.test(lowerMsg);
+    const hasCpuSnapshot = snapshot.cpuPercent !== null;
+    const cpuIsElevated = hasCpuSnapshot && (snapshot.cpuPercent ?? 0) >= 70;
+    const dnsFailed = snapshot.dnsResolved === false;
+    const diskLow = snapshot.diskFreeGb !== null && snapshot.diskFreeGb < 10;
+    const memHigh = snapshot.memoryTotalMb && snapshot.memoryUsedMb && (snapshot.memoryUsedMb / snapshot.memoryTotalMb) > 0.85;
+
+    let addressedSymptomMismatch = false;
+    let reply = '';
+    const updatedHypotheses: TriageHypothesis[] = [];
+
+    if (mentionsCpu && !cpuIsElevated) {
+      // Symptom mismatch: user reports CPU/fan issue, but snapshot CPU is normal/null
+      addressedSymptomMismatch = true;
+      const cpuMetricStr = hasCpuSnapshot ? `${snapshot.cpuPercent}%` : 'not captured';
+
+      let secondaryFinding = '';
+      if (dnsFailed) {
+        secondaryFinding = 'However, our telemetry detected that **DNS hostname resolution is failing**, which frequently causes browsers and background synchronizers to hang waiting for sockets.';
+        updatedHypotheses.push({ id: 'hyp-net', domain: 'network_dns', summary: 'DNS resolution failure causing system/app stalls', confidence: 0.9, status: 'confirmed' });
+      } else if (diskLow) {
+        secondaryFinding = `However, primary disk space is critically low at **${snapshot.diskFreeGb} GB free**, which can throttle virtual memory paging and cache flushes.`;
+        updatedHypotheses.push({ id: 'hyp-disk', domain: 'disk_io', summary: 'Low disk space throttling virtual memory', confidence: 0.85, status: 'confirmed' });
+      } else if (memHigh) {
+        secondaryFinding = `However, system memory is heavily utilized at **${Math.round(((snapshot.memoryUsedMb || 0) / (snapshot.memoryTotalMb || 1)) * 100)}%**, which may cause page fault thrashing.`;
+        updatedHypotheses.push({ id: 'hyp-mem', domain: 'memory', summary: 'High memory pressure causing background paging', confidence: 0.85, status: 'confirmed' });
+      } else {
+        secondaryFinding = 'All core hardware metrics are operating within nominal thresholds in this specific measurement window.';
+      }
+
+      reply = `Your active telemetry snapshot records CPU usage at **${cpuMetricStr}**, which does not indicate continuous thermal overload during this sample. ${secondaryFinding} Would you like to inspect secondary services or capture a fresh sample while reproducing the workload?`;
+      updatedHypotheses.push({ id: 'hyp-cpu', domain: 'cpu_thermal', summary: 'CPU thermal overload during sample', confidence: 0.2, status: 'ruled_out' });
+    } else if (cpuIsElevated) {
+      const topProc = snapshot.processes && snapshot.processes.length > 0 ? snapshot.processes[0] : null;
+      const procInfo = topProc ? ` Top consumer: \`${topProc.name}\` (${topProc.cpuPercent !== null ? topProc.cpuPercent + '%' : 'sampled'}).` : '';
+      reply = `Your active telemetry snapshot confirms elevated CPU utilization at **${snapshot.cpuPercent}%**.${procInfo} Would you like to review non-elevated remediation options or isolate background tasks?`;
+      updatedHypotheses.push({ id: 'hyp-cpu', domain: 'cpu_thermal', summary: 'High CPU utilization confirmed by telemetry', confidence: 0.95, status: 'confirmed' });
+    } else {
+      reply = `Based on your active telemetry snapshot, memory is at ${snapshot.memoryUsedMb ? Math.round(((snapshot.memoryUsedMb) / (snapshot.memoryTotalMb || 1)) * 100) + '%' : 'normal'} and network status is ${snapshot.dnsResolved === false ? 'Degraded (DNS failing)' : 'Healthy'}. What specific behavior would you like to drill into next?`;
+      updatedHypotheses.push({ id: 'hyp-gen', domain: 'application', summary: 'System telemetry under review', confidence: 0.7, status: 'active' });
+    }
+
+    return {
+      stage: 'active_investigation',
+      reply,
+      quickReplies: [
+        'Review recommended fix',
+        'Explain DNS status',
+        'Take a fresh sample',
+        'Export offline report',
+      ],
+      hypotheses: updatedHypotheses,
+      recommendedAction: cpuIsElevated || dnsFailed || diskLow ? 'propose_remediation' : 'ask_clarifying_question',
+      addressedSymptomMismatch,
+    };
+  }
+
+  // 3. Browser WebAPI Diagnostic Check Request
+  if (lowerMsg.includes('browser check') || lowerMsg.includes('instant check') || lowerMsg.includes('no download') || stage === 'browser_probe') {
+    return {
+      stage: 'browser_probe',
+      reply: 'We can run an instant in-browser WebAPI diagnostic right now with zero downloads and no terminal access. This checks hardware concurrency, memory capacity, network ping, and GPU renderer.',
+      quickReplies: [
+        'Run browser check now',
+        'Skip to OS collector',
+        'Cancel',
+      ],
+      hypotheses: [
+        { id: 'hyp-web', domain: 'application', summary: 'Evaluating client browser environment and hardware capabilities', confidence: 0.5, status: 'active' },
+      ],
+      recommendedAction: 'run_browser_probe',
+      addressedSymptomMismatch: false,
+    };
+  }
+
+  // 4. Deep OS Collector Request
+  if (lowerMsg.includes('system check') || lowerMsg.includes('os collector') || lowerMsg.includes('run deep') || lowerMsg.includes('powershell') || lowerMsg.includes('terminal')) {
+    return {
+      stage: 'awaiting_authorization',
+      reply: 'To capture live OS-level processor, disk, and socket telemetry, please select your workstation platform and authorize the read-only inspection collector.',
+      quickReplies: [
+        'Authorize & start investigation',
+        'Back to browser check',
+      ],
+      hypotheses: [
+        { id: 'hyp-os', domain: 'cpu_thermal', summary: 'Awaiting device-level inspection snapshot', confidence: 0.6, status: 'active' },
+      ],
+      recommendedAction: 'request_os_collector',
+      addressedSymptomMismatch: false,
+    };
+  }
+
+  // 5. Deductive Questioning: Rule out fault domains with exactly ONE question
+  if (/cpu|fan|noise|heat|warm|freez|freeze|overheat/i.test(lowerMsg)) {
+    return {
+      stage: 'deductive_questioning',
+      reply: 'High fan noise and system freezes usually indicate sustained CPU load, background indexing, or hardware acceleration failure. When this happens, does it occur while using a specific app (such as Chrome or a video call), or even when the computer is completely idle?',
+      quickReplies: [
+        'While using browser',
+        'During video calls',
+        'Even when idle',
+        'Run instant browser check',
+      ],
+      hypotheses: [
+        { id: 'hyp-cpu', domain: 'cpu_thermal', summary: 'Sustained user-space process CPU utilization', confidence: 0.7, status: 'active' },
+        { id: 'hyp-app', domain: 'application', summary: 'Browser or video conferencing acceleration failure', confidence: 0.6, status: 'active' },
+        { id: 'hyp-net', domain: 'network_dns', summary: 'Network socket failure', confidence: 0.1, status: 'ruled_out' },
+      ],
+      recommendedAction: 'ask_clarifying_question',
+      addressedSymptomMismatch: false,
+    };
+  }
+
+  if (/wifi|wi-fi|dns|network|internet|connect|disconnect|offline|load/i.test(lowerMsg)) {
+    return {
+      stage: 'deductive_questioning',
+      reply: 'Network and DNS disruptions can stem from local gateway drops, DHCP leases, or stale hostname caches. Are all websites failing to load, or only specific company or internal domains?',
+      quickReplies: [
+        'All websites fail',
+        'Only specific internal sites',
+        'Connection drops intermittently',
+        'Run instant browser check',
+      ],
+      hypotheses: [
+        { id: 'hyp-net', domain: 'network_dns', summary: 'Local DNS resolver cache or gateway timeout', confidence: 0.8, status: 'active' },
+        { id: 'hyp-app', domain: 'application', summary: 'Browser proxy or VPN tunnel failure', confidence: 0.4, status: 'active' },
+        { id: 'hyp-cpu', domain: 'cpu_thermal', summary: 'CPU throttling', confidence: 0.1, status: 'ruled_out' },
+      ],
+      recommendedAction: 'ask_clarifying_question',
+      addressedSymptomMismatch: false,
+    };
+  }
+
+  if (/disk|space|storage|drive|gigabyte|full/i.test(lowerMsg)) {
+    return {
+      stage: 'deductive_questioning',
+      reply: 'Low disk capacity can halt swap memory and cache operations. Are you seeing an explicit "Out of Disk Space" alert when saving files or updating, or is the system just generally sluggish?',
+      quickReplies: [
+        'Yes, disk full alert',
+        'System is sluggish',
+        'Can\'t install updates',
+        'Run instant browser check',
+      ],
+      hypotheses: [
+        { id: 'hyp-disk', domain: 'disk_io', summary: 'Exhausted system drive or temporary file accumulation', confidence: 0.8, status: 'active' },
+        { id: 'hyp-app', domain: 'application', summary: 'Unbounded application cache growth', confidence: 0.5, status: 'active' },
+        { id: 'hyp-net', domain: 'network_dns', summary: 'Network connection failure', confidence: 0.1, status: 'ruled_out' },
+      ],
+      recommendedAction: 'ask_clarifying_question',
+      addressedSymptomMismatch: false,
+    };
+  }
+
+  // Default deductive questioning fallback
+  return {
+    stage: 'deductive_questioning',
+    reply: 'Understood. To help isolate the source without running unneeded scripts: did this behavior begin suddenly today after a specific change, or has it been gradually degrading over time?',
+    quickReplies: [
+      'Started suddenly today',
+      'Happening for several days',
+      'Only during heavy workloads',
+      'Run instant browser check',
+    ],
+    hypotheses: [
+      { id: 'hyp-app', domain: 'application', summary: 'Recent software or configuration regression', confidence: 0.5, status: 'active' },
+      { id: 'hyp-res', domain: 'cpu_thermal', summary: 'Resource constraint under peak load', confidence: 0.4, status: 'active' },
+    ],
+    recommendedAction: 'ask_clarifying_question',
+    addressedSymptomMismatch: false,
+  };
+}
+
+/**
+ * Executes a deductive triage step through the AI provider adapter.
+ */
+export async function executeDeductiveTriage(
+  request: DeductiveTriageRequest,
+  config?: AIProviderConfig,
+): Promise<DeductiveTriageResponse> {
+  return buildDeductiveTriage(request);
+}
+

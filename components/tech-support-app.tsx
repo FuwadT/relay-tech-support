@@ -816,10 +816,23 @@ export default function TechSupportApp({
                     Diagnose system issues interactively with zero-install guidance, local read-only telemetry scripts, and evidence-linked findings.
                   </p>
                 </div>
-                <button className="button primary" onClick={() => start()}>
-                  Start a case
-                  <ArrowRight size={16} />
-                </button>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button
+                    className="button secondary"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                    onClick={() => {
+                      setTriageCategory(undefined);
+                      navigate('triage');
+                    }}
+                  >
+                    <Sparkles size={16} style={{ color: '#a44526' }} />
+                    Zero-Install Triage
+                  </button>
+                  <button className="button primary" onClick={() => start()}>
+                    Start a case
+                    <ArrowRight size={16} />
+                  </button>
+                </div>
               </div>
 
               <div className="section-heading">

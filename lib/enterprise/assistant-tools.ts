@@ -72,6 +72,20 @@ export const RELAY_ASSISTANT_TOOLS = [
       required: ['caseId'],
     },
   },
+  {
+    name: 'relay_run_browser_diagnostic_probe',
+    description: 'Requests a client-side zero-install browser WebAPI probe to inspect hardware concurrency, device memory, network connection, API round-trip latency, and WebGL GPU renderer without installing OS scripts.',
+    parameters: {
+      type: 'object',
+      properties: {
+        caseId: {
+          type: 'string',
+          description: 'The UUID of the Relay enterprise case to probe.',
+        },
+      },
+      required: ['caseId'],
+    },
+  },
 ] as const;
 
 /**
@@ -193,6 +207,23 @@ export async function executeAssistantTool(
           retentionDays: 30,
           cspPolicy: "default-src 'none'; style-src 'unsafe-inline';",
           provenance: 'device_reported_unverified',
+        },
+      };
+    }
+
+    case 'relay_run_browser_diagnostic_probe': {
+      const caseId = typeof args.caseId === 'string' ? args.caseId.trim() : '';
+      if (!caseId) return { ok: false, error: 'caseId parameter is required.' };
+
+      return {
+        ok: true,
+        data: {
+          caseId,
+          organizationId: context.organizationId,
+          probeType: 'browser_webapi_diagnostic',
+          instructions: 'Client triggers lib/browser-probe.ts to inspect navigator.hardwareConcurrency, deviceMemory, connection, and WebGL GPU renderer.',
+          requiresTerminal: false,
+          requiresDownload: false,
         },
       };
     }

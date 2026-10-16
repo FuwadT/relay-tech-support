@@ -9,8 +9,10 @@ import { describe, it } from 'node:test';
 import type { DevicePlatform, EvidenceFinding, TelemetrySnapshot } from '../lib/enterprise/contracts';
 import {
   APPROVED_DIAGNOSTIC_CHECK_IDS,
+  buildDeductiveTriage,
   buildDeterministicFallback,
   executeAIAnalysis,
+  validateDeductiveTriageResponse,
   validateStructuredAIOutput,
   type AIAnalysisRequest,
   type AIProviderConfig,
@@ -181,3 +183,92 @@ describe('E6-01: Provider Controls, Allowlists, and Deterministic Fallback', () 
     assert.strictEqual(anthropicFallback.provider, 'anthropic');
   });
 });
+
+describe('Phase 2: Multi-Turn Deductive Triage & Hypothesis Pruning', () => {
+  it('intake_discovery returns greeting, clarifying quickReplies, and active domain hypotheses', () => {
+    const res = buildDeductiveTriage({
+      stage: 'intake_discovery',
+      userMessage: '',
+      platform: 'windows',
+    });
+
+    assert.strictEqual(res.stage, 'deductive_questioning');
+    assert.ok(res.reply.includes('What seems to be the issue'));
+    assert.ok(res.quickReplies.length >= 3);
+    assert.ok(res.hypotheses.length >= 3);
+    assert.strictEqual(res.recommendedAction, 'ask_clarifying_question');
+    assert.strictEqual(res.addressedSymptomMismatch, false);
+  });
+
+  it('deductive_questioning formulates targeted hypotheses and asks exactly one clarifying question', () => {
+    const res = buildDeductiveTriage({
+      stage: 'deductive_questioning',
+      userMessage: 'The fan noise is very loud and my computer freezes',
+      platform: 'windows',
+    });
+
+    assert.strictEqual(res.stage, 'deductive_questioning');
+    assert.ok(res.reply.includes('fan noise and system freezes'));
+    const cpuHyp = res.hypotheses.find((h) => h.domain === 'cpu_thermal');
+    const netHyp = res.hypotheses.find((h) => h.domain === 'network_dns');
+    assert.ok(cpuHyp && cpuHyp.status === 'active' && cpuHyp.confidence >= 0.6);
+    assert.ok(netHyp && netHyp.status === 'ruled_out');
+    assert.strictEqual(res.recommendedAction, 'ask_clarifying_question');
+  });
+
+  it('active_investigation answers follow-up directly from existing snapshot without resetting authorization', () => {
+    const res = buildDeductiveTriage({
+      stage: 'active_investigation',
+      userMessage: 'Is my CPU running too hot or at high usage?',
+      platform: 'windows',
+      snapshot: mockSnapshot,
+    });
+
+    assert.strictEqual(res.stage, 'active_investigation');
+    assert.ok(res.reply.includes('92%'));
+    assert.ok(res.reply.includes('SearchIndexer.exe'));
+    const cpuHyp = res.hypotheses.find((h) => h.domain === 'cpu_thermal');
+    assert.ok(cpuHyp && cpuHyp.status === 'confirmed');
+    assert.strictEqual(res.addressedSymptomMismatch, false);
+  });
+
+  it('active_investigation detects symptom-vs-telemetry mismatch and explains secondary bottleneck', () => {
+    const mismatchSnapshot: TelemetrySnapshot = {
+      ...mockSnapshot,
+      cpuPercent: null,
+      dnsResolved: false,
+    };
+
+    const res = buildDeductiveTriage({
+      stage: 'active_investigation',
+      userMessage: 'My fans are spinning loud, is CPU usage high?',
+      platform: 'windows',
+      snapshot: mismatchSnapshot,
+    });
+
+    assert.strictEqual(res.stage, 'active_investigation');
+    assert.strictEqual(res.addressedSymptomMismatch, true);
+    assert.ok(res.reply.includes('does not indicate continuous thermal overload'));
+    assert.ok(res.reply.includes('DNS hostname resolution is failing'));
+    const netHyp = res.hypotheses.find((h) => h.domain === 'network_dns');
+    const cpuHyp = res.hypotheses.find((h) => h.domain === 'cpu_thermal');
+    assert.ok(netHyp && netHyp.status === 'confirmed');
+    assert.ok(cpuHyp && cpuHyp.status === 'ruled_out');
+  });
+
+  it('validates DeductiveTriageResponse structure with validateDeductiveTriageResponse', () => {
+    const valid = {
+      stage: 'deductive_questioning',
+      reply: 'Clarifying question',
+      quickReplies: ['A', 'B'],
+      hypotheses: [{ id: '1', domain: 'cpu_thermal', summary: 'test', confidence: 0.8, status: 'active' }],
+      recommendedAction: 'ask_clarifying_question',
+    };
+    const result = validateDeductiveTriageResponse(valid);
+    assert.strictEqual(result.ok, true);
+
+    const invalid = { reply: '' };
+    assert.strictEqual(validateDeductiveTriageResponse(invalid).ok, false);
+  });
+});
+

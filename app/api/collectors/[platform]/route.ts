@@ -14,16 +14,26 @@ export async function GET(request: Request, context: Context) {
   }
 
   const url = new URL(request.url);
-  const caseId = url.searchParams.get('caseId');
-  const callbackUrl = url.searchParams.get('callbackUrl');
+  const rawCaseId = url.searchParams.get('caseId') || '';
+  const rawCallbackUrl = url.searchParams.get('callbackUrl') || '';
+  const safeCaseId = rawCaseId.replace(/[^a-zA-Z0-9_-]/g, '');
+  let safeCallbackUrl = '';
+  if (rawCallbackUrl) {
+    try {
+      const parsedCb = new URL(rawCallbackUrl);
+      if (parsedCb.protocol === 'http:' || parsedCb.protocol === 'https:') {
+        safeCallbackUrl = parsedCb.toString().replace(/["`$\\]/g, '');
+      }
+    } catch {}
+  }
 
   let content = script.content;
-  if (callbackUrl || caseId) {
+  if (safeCallbackUrl || safeCaseId) {
     if (script.platform === 'windows') {
-      const inject = `$env:RELAY_CASE_ID = "${caseId || ''}"\n$env:RELAY_CALLBACK_URL = "${callbackUrl || ''}"\n`;
+      const inject = `$env:RELAY_CASE_ID = "${safeCaseId}"\n$env:RELAY_CALLBACK_URL = "${safeCallbackUrl}"\n`;
       content = inject + content;
     } else {
-      const inject = `export RELAY_CASE_ID="${caseId || ''}"\nexport RELAY_CALLBACK_URL="${callbackUrl || ''}"\n`;
+      const inject = `export RELAY_CASE_ID="${safeCaseId}"\nexport RELAY_CALLBACK_URL="${safeCallbackUrl}"\n`;
       content = content.replace(/^#!\/usr\/bin\/env bash\n/, `#!/usr/bin/env bash\n${inject}`);
     }
   }

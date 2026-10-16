@@ -93,3 +93,29 @@ export interface ExecutionReport {
 export type ModelProvider = 'openai' | 'anthropic' | 'gemini';
 export type TicketingProvider = 'servicenow' | 'jira-service-management' | 'freshservice';
 export type ValidationResult<T> = { ok: true; value: T } | { ok: false; error: string };
+
+export type EnterpriseTriageStage =
+  | 'intake_discovery'
+  | 'deductive_questioning'
+  | 'browser_probe'
+  | 'awaiting_authorization'
+  | 'awaiting_telemetry'
+  | 'active_investigation';
+
+export interface TriageHypothesis {
+  id: string;
+  domain: 'cpu_thermal' | 'memory' | 'disk_io' | 'network_dns' | 'application' | 'permissions';
+  summary: string;
+  confidence: number; // 0.0 - 1.0
+  status: 'active' | 'ruled_out' | 'confirmed';
+}
+
+export interface DeductiveTriageResponse {
+  stage: EnterpriseTriageStage;
+  reply: string;
+  quickReplies: string[];
+  hypotheses: TriageHypothesis[];
+  recommendedAction: 'ask_clarifying_question' | 'run_browser_probe' | 'request_os_collector' | 'propose_remediation' | 'escalate';
+  addressedSymptomMismatch?: boolean;
+}
+

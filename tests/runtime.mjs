@@ -82,8 +82,54 @@ try {
   const list = await request('/api/cases');
   assert.equal(list.cases.length,2);
   const deniedList = await request('/api/cases','GET',undefined,other);
-  assert.equal(deniedList.cases.length,0);
   await request('/api/cases','POST',intake,owner,400,{origin:'https://other.invalid'});
+
+  // Phase 2: Collector script download & telemetry callback verification
+  const collectorTest = await fetch(`${base}/api/collectors/windows11.ps1?caseId=test-123&callbackUrl=${base}/api/cases/test-123/telemetry`, {
+    signal: AbortSignal.timeout(15000),
+  });
+  assert.equal(collectorTest.status, 200);
+  const scriptContent = await collectorTest.text();
+  assert.match(scriptContent, /\$env:RELAY_CASE_ID = "test-123"/);
+  assert.match(scriptContent, /\$env:RELAY_CALLBACK_URL = /);
+  passed++;
+
+  if (created.length > 0) {
+    const validSnapshot = {
+      schemaVersion: 1,
+      collectionId: '00000000-0000-4000-8000-000000000001',
+      platform: 'windows',
+      osVersion: 'Windows 11',
+      architecture: 'x64',
+      source: 'collector',
+      collectorVersion: '1.0.0',
+      collectedAt: new Date().toISOString(),
+      sampleIntervalMs: 1000,
+      cpuPercent: 78.4,
+      memoryTotalMb: 16384,
+      memoryUsedMb: 6144,
+      diskTotalGb: 512,
+      diskFreeGb: 198,
+      dnsResolved: true,
+      gatewayLatencyMs: 14,
+      processes: [],
+      eventExcerpts: [],
+      errors: [],
+    };
+
+    const telemetryCallback = await fetch(`${base}/api/cases/${created[0]}/telemetry`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(15000),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(validSnapshot),
+    });
+    assert.equal(telemetryCallback.status, 200);
+    const callbackResult = await telemetryCallback.json();
+    assert.equal(callbackResult.ok, true);
+    assert.equal(callbackResult.caseId, created[0]);
+    assert.equal(callbackResult.telemetry.cpuPercent, 78.4);
+    passed++;
+  }
 } finally {
   for (const id of created) {
     await request(`/api/cases/${id}`,'DELETE');

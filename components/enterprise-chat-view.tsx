@@ -57,10 +57,15 @@ import {
   getCollectorScript,
   getCollectorTerminalSnippet,
 } from '@/lib/enterprise/collector-scripts';
+import {
+  runBrowserDiagnosticProbe,
+  analyzeBrowserProbe,
+} from '@/lib/browser-probe';
 
 export type TriageStage =
   | 'intake_discovery'       // Initial greeting: "What seems to be the issue you are having?"
   | 'deductive_questioning'  // 1-2 clarifying questions with quick-reply chips before any downloads
+  | 'browser_probe'          // Zero-install in-browser WebAPI diagnostics
   | 'awaiting_authorization' // Only reached if zero-install steps cannot resolve the issue
   | 'awaiting_telemetry'     // Waiting for 1-click browser probe, clipboard, or self-uploading collector
   | 'active_investigation';  // Telemetry is loaded; follow-up questions query the snapshot!
@@ -360,8 +365,84 @@ export function EnterpriseChatView({
   const [pastedTelemetryText, setPastedTelemetryText] = useState('');
   const [pasteError, setPasteError] = useState('');
   const [currentOrigin, setCurrentOrigin] = useState('http://127.0.0.1:8790');
+  const [isRunningProbe, setIsRunningProbe] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const handleRunBrowserProbe = async () => {
+    if (isRunningProbe) return;
+    setIsRunningProbe(true);
+    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        sender: 'user',
+        text: 'Run Instant Browser Diagnostic (No Download)',
+        timestamp: now,
+      },
+      {
+        id: crypto.randomUUID(),
+        sender: 'assistant',
+        text: 'Running zero-install client-side WebAPI probe (checking hardware concurrency, memory capacity, network ping, and GPU renderer)...',
+        timestamp: now,
+      },
+    ]);
+
+    try {
+      const result = await runBrowserDiagnosticProbe(
+        selectedPlatform === 'windows' ? 'windows11' : selectedPlatform === 'macos' ? 'macos' : 'ubuntu'
+      );
+      const analysis = analyzeBrowserProbe(result);
+
+      const probeDetails = [
+        `• **Platform**: ${result.platform} (${result.hardwareConcurrency ? result.hardwareConcurrency + ' logical cores' : 'cores unmeasured'})`,
+        `• **Memory**: ${result.deviceMemoryGb ? result.deviceMemoryGb + ' GB estimated' : 'unrestricted'}`,
+        `• **Network Status**: ${result.network.online ? 'Online' : 'Offline'} (${result.timing.apiPingMs !== null ? result.timing.apiPingMs + ' ms server ping' : 'ping unmeasured'})`,
+        `• **GPU Renderer**: \`${result.gpuRenderer || 'Default WebGL context'}\``,
+        result.storage.quotaGb ? `• **Storage Quota**: ${result.storage.usageGb} GB used / ${result.storage.quotaGb} GB (${result.storage.freePercent}% free)` : null,
+      ].filter(Boolean).join('\n');
+
+      const observationLines = analysis.observations.map((o) => `• ${o}`).join('\n');
+      const hypothesisLines = analysis.hypotheses.map((h) => `• *Hypothesis*: ${h}`).join('\n');
+
+      const responseText = `**Zero-Install Browser WebAPI Diagnostic Completed:**\n\n${probeDetails}\n\n**Observations:**\n${observationLines}${hypothesisLines ? '\n\n**Initial Hypotheses:**\n' + hypothesisLines : ''}\n\n${
+        analysis.potentialSoftwareRendering
+          ? '⚠️ **Critical Finding**: GPU Hardware Acceleration is disabled! The browser is using CPU software rasterization, which directly triggers sustained high CPU and fan noise during media playback.'
+          : analysis.isHealthy
+          ? 'All core in-browser metrics are healthy. If you are experiencing OS-level freezes or fan noise outside the browser, we recommend running the read-only deep system check.'
+          : 'Potential hardware/network constraints detected above.'
+      }`;
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          sender: 'assistant',
+          text: responseText,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ]);
+
+      setPendingQuickReplies([
+        'Solved my issue',
+        'Still happening — run deep system check',
+      ]);
+      setStage('deductive_questioning');
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          sender: 'assistant',
+          text: 'Browser WebAPI probe encountered an error or was blocked by browser security settings. Would you like to proceed with the read-only OS collector?',
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ]);
+    } finally {
+      setIsRunningProbe(false);
+    }
+  };
 
   // Auto-detect client workstation OS on mount (Fix 6)
   useEffect(() => {
@@ -458,6 +539,18 @@ export function EnterpriseChatView({
       },
     ]);
     setInputPrompt('');
+
+    const lower = text.toLowerCase();
+    if (
+      lower.includes('run instant browser check') ||
+      lower.includes('run browser check') ||
+      lower.includes('browser check now') ||
+      lower.includes('instant browser check') ||
+      lower === 'run instant browser check (no download)'
+    ) {
+      void handleRunBrowserProbe();
+      return;
+    }
 
     // STAGE 1: intake_discovery -> Deductive Questioning (Fix 2)
     if (stage === 'intake_discovery') {
@@ -852,6 +945,16 @@ export function EnterpriseChatView({
                     >
                       Still happening — run deep system check
                     </button>
+                    <button
+                      type="button"
+                      className="button secondary btn-sm"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                      onClick={handleRunBrowserProbe}
+                      disabled={isRunningProbe}
+                    >
+                      <Sparkles size={14} style={{ color: '#a44526' }} />
+                      {isRunningProbe ? 'Probing WebAPIs…' : 'Run Instant Browser Check (No Download)'}
+                    </button>
                   </div>
                 </div>
               )}
@@ -1241,6 +1344,16 @@ export function EnterpriseChatView({
                   {reply}
                 </button>
               ))}
+              <button
+                type="button"
+                className="quick-reply-chip"
+                style={{ background: '#fbf2eb', borderColor: '#e6cfbf', color: '#a44526', fontWeight: 600 }}
+                onClick={handleRunBrowserProbe}
+                disabled={isRunningProbe}
+              >
+                <Sparkles size={12} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />
+                {isRunningProbe ? 'Running in-browser check…' : 'Run Instant Browser Check (No Download)'}
+              </button>
             </div>
           </div>
         )}
