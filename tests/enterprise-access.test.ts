@@ -249,3 +249,26 @@ test('reads recheck membership and role after initial principal resolution', asy
     assert.equal((await listEnterpriseCases(f.db, principal, now)).length, 0);
   } finally { f.sql.close(); }
 });
+
+test('invalid UTF-8 and streamed oversized JSON are rejected without trusted content-length', async () => {
+  const f = await fixture();
+  try {
+    const headers = { Origin: origin, Cookie: `__Host-relay_session=${f.tokens.alice}`,
+      'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() };
+    const invalidUtf8 = new Request(`${origin}/api/v2/organizations/${organizationA}/cases`, {
+      method: 'POST', headers, body: new Uint8Array([0x7b, 0xff, 0x7d]),
+    });
+    assert.equal((await handleEnterpriseRequest(invalidUtf8, { ENTERPRISE_DB: f.db, APP_ORIGIN: origin })).status, 400);
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new Uint8Array(9000)); controller.enqueue(new Uint8Array(9000)); },
+      cancel() { cancelled = true; },
+    });
+    const streamed = new Request(`${origin}/api/v2/organizations/${organizationA}/cases`, {
+      method: 'POST', headers, body, duplex: 'half',
+    } as RequestInit);
+    assert.equal((await handleEnterpriseRequest(streamed, { ENTERPRISE_DB: f.db, APP_ORIGIN: origin })).status, 413);
+    assert.equal(cancelled, true);
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM enterprise_cases').get()!.n, 0);
+  } finally { f.sql.close(); }
+});
