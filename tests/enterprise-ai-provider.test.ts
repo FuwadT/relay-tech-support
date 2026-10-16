@@ -297,5 +297,60 @@ describe('Phase 2: Multi-Turn Deductive Triage & Hypothesis Pruning', () => {
     assert.ok(!res.reply.toLowerCase().includes('fan noise'));
     assert.ok(res.quickReplies.length >= 3);
   });
+
+  it('executeDeductiveTriage prevents infinite loop when user answers scope and timing questions', async () => {
+    // Turn 1
+    const t1 = await executeDeductiveTriage({
+      stage: 'deductive_questioning',
+      userMessage: 'my computer is just running slowly',
+      platform: 'windows',
+      conversationHistory: [],
+    });
+    assert.ok(t1.reply.includes('browser') || t1.reply.includes('operating system'));
+
+    // Turn 2: User specifies entire operating system
+    const history1: Array<{ sender: 'user' | 'assistant'; text: string }> = [
+      { sender: 'user', text: 'my computer is just running slowly' },
+      { sender: 'assistant', text: t1.reply },
+    ];
+    const t2 = await executeDeductiveTriage({
+      stage: 'deductive_questioning',
+      userMessage: 'the entire operating system',
+      platform: 'windows',
+      conversationHistory: history1,
+    });
+    assert.ok(t2.reply.includes('begin suddenly today'));
+
+    // Turn 3: User answers timing ("started today")
+    const history2: Array<{ sender: 'user' | 'assistant'; text: string }> = [
+      ...history1,
+      { sender: 'user', text: 'the entire operating system' },
+      { sender: 'assistant', text: t2.reply },
+    ];
+    const t3 = await executeDeductiveTriage({
+      stage: 'deductive_questioning',
+      userMessage: 'started today',
+      platform: 'windows',
+      conversationHistory: history2,
+    });
+    // Must NOT repeat the timing question! Must progress to diagnostic checks
+    assert.ok(!t3.reply.includes('did this behavior begin suddenly today'));
+    assert.ok(t3.reply.includes('check') || t3.reply.includes('slowdowns') || t3.reply.includes('metrics'));
+    assert.ok(t3.quickReplies.some((r) => r.includes('browser check') || r.includes('system check')));
+
+    // Turn 4: User repeats timing or says "its been happening over time"
+    const history3: Array<{ sender: 'user' | 'assistant'; text: string }> = [
+      ...history2,
+      { sender: 'user', text: 'started today' },
+      { sender: 'assistant', text: t3.reply },
+    ];
+    const t4 = await executeDeductiveTriage({
+      stage: 'deductive_questioning',
+      userMessage: 'its been happening over time',
+      platform: 'windows',
+      conversationHistory: history3,
+    });
+    assert.ok(!t4.reply.includes('did this behavior begin suddenly today'));
+  });
 });
 

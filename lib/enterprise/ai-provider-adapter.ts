@@ -282,8 +282,22 @@ export function validateDeductiveTriageResponse(raw: unknown): ValidationResult<
  * Rules out hypotheses systematically and bridges symptom mismatches with ground-truth telemetry.
  */
 export function buildDeductiveTriage(request: DeductiveTriageRequest): DeductiveTriageResponse {
-  const { stage, userMessage, snapshot } = request;
+  const { stage, userMessage, snapshot, conversationHistory = [] } = request;
   const lowerMsg = userMessage.toLowerCase().trim();
+
+  const assistantHistory = conversationHistory
+    .filter((m) => m.sender === 'assistant')
+    .map((m) => m.text.toLowerCase());
+  const userHistory = conversationHistory
+    .filter((m) => m.sender === 'user')
+    .map((m) => m.text.toLowerCase());
+
+  const hasAskedSlownessScope = assistantHistory.some(
+    (t) => t.includes('primarily inside your web browser') || t.includes('specific web app'),
+  );
+  const hasAskedTiming = assistantHistory.some(
+    (t) => t.includes('begin suddenly today') || t.includes('gradually degrading'),
+  );
 
   // 1. Intake Discovery: Greeting and open-ended discovery
   if (stage === 'intake_discovery' || !lowerMsg) {
@@ -487,31 +501,228 @@ export function buildDeductiveTriage(request: DeductiveTriageRequest): Deductive
     };
   }
 
-  // Slowness without fan noise
-  if (/freez|freeze|sluggish|slow|lag|unresponsive/i.test(lowerMsg)) {
+  // Answers to timing question (e.g. "started today", "its been happening over time", "suddenly today")
+  const isTimingAnswer =
+    /sudden|today|several days|gradual|over time|happening for|heavy workload/i.test(lowerMsg);
+  if (
+    isTimingAnswer ||
+    (hasAskedTiming && !lowerMsg.includes('browser check') && !lowerMsg.includes('system check'))
+  ) {
+    const isSudden = /sudden|today|recent/i.test(lowerMsg);
     return {
       stage: 'deductive_questioning',
-      reply: 'To isolate what is causing the slowdown without running unneeded scripts: does this sluggishness happen primarily inside your web browser or a specific web app, or is the entire operating system lagging even when idle?',
+      reply: isSudden
+        ? 'Understood. Sudden system-wide slowdowns typically point to a background process consuming high CPU/RAM, an interrupted background update, or thermal throttling. Let’s check your system metrics to identify the culprit:'
+        : 'Understood. Gradual slowdowns over time typically point to temporary file buildup, low disk space on your OS drive, or cumulative memory fragmentation. Let’s check your system metrics to identify the culprit:',
       quickReplies: [
-        'In web browser / portal',
-        'Specific desktop application',
-        'Entire computer lags when idle',
+        'Run instant browser check',
+        'Run read-only system check',
+        'Show Task Manager steps',
+      ],
+      hypotheses: [
+        {
+          id: 'hyp-proc',
+          domain: 'cpu_thermal',
+          summary: isSudden
+            ? 'Recent background process contention or thermal throttle'
+            : 'Cumulative resource starvation',
+          confidence: 0.8,
+          status: 'active',
+        },
+        {
+          id: 'hyp-mem',
+          domain: 'memory',
+          summary: 'Memory contention or background paging',
+          confidence: 0.6,
+          status: 'active',
+        },
+      ],
+      recommendedAction: 'run_browser_probe',
+      addressedSymptomMismatch: false,
+    };
+  }
+
+  // Answers to scope question: entire OS / computer
+  const isEntireOS =
+    /entire (operating system|os|computer)|all apps|everything|lags when idle|idle/i.test(lowerMsg);
+  if (isEntireOS && !hasAskedTiming) {
+    return {
+      stage: 'deductive_questioning',
+      reply:
+        'Understood. Since the slowdown affects the entire operating system, did this behavior begin suddenly today after a specific change, or has it been gradually degrading over time?',
+      quickReplies: [
+        'Started suddenly today',
+        'Happening for several days',
+        'Only during heavy workloads',
         'Run instant browser check',
       ],
       hypotheses: [
-        { id: 'hyp-app', domain: 'application', summary: 'Application or browser memory consumption', confidence: 0.7, status: 'active' },
-        { id: 'hyp-cpu', domain: 'cpu_thermal', summary: 'General system resource constraint', confidence: 0.5, status: 'active' },
-        { id: 'hyp-net', domain: 'network_dns', summary: 'Network latency perceived as UI lag', confidence: 0.3, status: 'active' },
+        {
+          id: 'hyp-app',
+          domain: 'application',
+          summary: 'Recent software or configuration regression',
+          confidence: 0.5,
+          status: 'active',
+        },
+        {
+          id: 'hyp-res',
+          domain: 'cpu_thermal',
+          summary: 'Resource constraint under peak load',
+          confidence: 0.5,
+          status: 'active',
+        },
       ],
       recommendedAction: 'ask_clarifying_question',
       addressedSymptomMismatch: false,
     };
   }
 
-  // Default deductive questioning fallback
+  // Answers to scope question: web browser only
+  const isBrowserScope =
+    /web browser|portal|browser tab|in browser|browser/i.test(lowerMsg);
+  if (
+    isBrowserScope &&
+    !lowerMsg.includes('browser check') &&
+    !lowerMsg.includes('no download')
+  ) {
+    return {
+      stage: 'deductive_questioning',
+      reply:
+        'Since the sluggishness is isolated to your web browser, here are immediate zero-install steps to resolve it without downloading scripts:\n\n1. **Browser Task Manager**: Press `Shift + Esc` to see which tab or extension is consuming high CPU/memory.\n2. **Hardware Acceleration**: Verify Hardware Acceleration is enabled in browser `Settings > System`.\n3. **Clear Site Data**: Clear cached images and cookies for the sluggish domains.',
+      quickReplies: [
+        'Run instant browser check',
+        'Solved my issue',
+        'Still happening — run deep system check',
+      ],
+      hypotheses: [
+        {
+          id: 'hyp-browser',
+          domain: 'application',
+          summary: 'Browser tab or extension resource contention',
+          confidence: 0.85,
+          status: 'active',
+        },
+        {
+          id: 'hyp-hw',
+          domain: 'cpu_thermal',
+          summary: 'Disabled GPU acceleration causing CPU rasterization',
+          confidence: 0.7,
+          status: 'active',
+        },
+      ],
+      recommendedAction: 'run_browser_probe',
+      addressedSymptomMismatch: false,
+    };
+  }
+
+  // Slowness without fan noise
+  if (/freez|freeze|sluggish|slow|lag|unresponsive/i.test(lowerMsg)) {
+    if (!hasAskedSlownessScope) {
+      return {
+        stage: 'deductive_questioning',
+        reply:
+          'To isolate what is causing the slowdown without running unneeded scripts: does this sluggishness happen primarily inside your web browser or a specific web app, or is the entire operating system lagging even when idle?',
+        quickReplies: [
+          'In web browser / portal',
+          'Specific desktop application',
+          'Entire computer lags when idle',
+          'Run instant browser check',
+        ],
+        hypotheses: [
+          {
+            id: 'hyp-app',
+            domain: 'application',
+            summary: 'Application or browser memory consumption',
+            confidence: 0.7,
+            status: 'active',
+          },
+          {
+            id: 'hyp-cpu',
+            domain: 'cpu_thermal',
+            summary: 'General system resource constraint',
+            confidence: 0.5,
+            status: 'active',
+          },
+          {
+            id: 'hyp-net',
+            domain: 'network_dns',
+            summary: 'Network latency perceived as UI lag',
+            confidence: 0.3,
+            status: 'active',
+          },
+        ],
+        recommendedAction: 'ask_clarifying_question',
+        addressedSymptomMismatch: false,
+      };
+    } else if (!hasAskedTiming) {
+      return {
+        stage: 'deductive_questioning',
+        reply:
+          'Understood. To help isolate the source without running unneeded scripts: did this behavior begin suddenly today after a specific change, or has it been gradually degrading over time?',
+        quickReplies: [
+          'Started suddenly today',
+          'Happening for several days',
+          'Only during heavy workloads',
+          'Run instant browser check',
+        ],
+        hypotheses: [
+          {
+            id: 'hyp-app',
+            domain: 'application',
+            summary: 'Recent software or configuration regression',
+            confidence: 0.5,
+            status: 'active',
+          },
+          {
+            id: 'hyp-res',
+            domain: 'cpu_thermal',
+            summary: 'Resource constraint under peak load',
+            confidence: 0.4,
+            status: 'active',
+          },
+        ],
+        recommendedAction: 'ask_clarifying_question',
+        addressedSymptomMismatch: false,
+      };
+    }
+  }
+
+  // Default deductive questioning fallback — Anti-Loop Guard
+  if (hasAskedTiming || userHistory.length >= 2) {
+    return {
+      stage: 'deductive_questioning',
+      reply:
+        'Thank you for providing those details. We have narrowed down the diagnostic scope. Would you like to run the zero-install browser check right now, or capture a read-only OS inspection snapshot to measure CPU, memory, and running processes?',
+      quickReplies: [
+        'Run instant browser check',
+        'Run read-only system check',
+        'Show manual troubleshooting steps',
+      ],
+      hypotheses: [
+        {
+          id: 'hyp-res',
+          domain: 'cpu_thermal',
+          summary: 'System resource contention under investigation',
+          confidence: 0.6,
+          status: 'active',
+        },
+        {
+          id: 'hyp-app',
+          domain: 'application',
+          summary: 'Background process or software contention',
+          confidence: 0.5,
+          status: 'active',
+        },
+      ],
+      recommendedAction: 'run_browser_probe',
+      addressedSymptomMismatch: false,
+    };
+  }
+
   return {
     stage: 'deductive_questioning',
-    reply: 'Understood. To help isolate the source without running unneeded scripts: did this behavior begin suddenly today after a specific change, or has it been gradually degrading over time?',
+    reply:
+      'Understood. To help isolate the source without running unneeded scripts: did this behavior begin suddenly today after a specific change, or has it been gradually degrading over time?',
     quickReplies: [
       'Started suddenly today',
       'Happening for several days',
@@ -519,8 +730,20 @@ export function buildDeductiveTriage(request: DeductiveTriageRequest): Deductive
       'Run instant browser check',
     ],
     hypotheses: [
-      { id: 'hyp-app', domain: 'application', summary: 'Recent software or configuration regression', confidence: 0.5, status: 'active' },
-      { id: 'hyp-res', domain: 'cpu_thermal', summary: 'Resource constraint under peak load', confidence: 0.4, status: 'active' },
+      {
+        id: 'hyp-app',
+        domain: 'application',
+        summary: 'Recent software or configuration regression',
+        confidence: 0.5,
+        status: 'active',
+      },
+      {
+        id: 'hyp-res',
+        domain: 'cpu_thermal',
+        summary: 'Resource constraint under peak load',
+        confidence: 0.4,
+        status: 'active',
+      },
     ],
     recommendedAction: 'ask_clarifying_question',
     addressedSymptomMismatch: false,
