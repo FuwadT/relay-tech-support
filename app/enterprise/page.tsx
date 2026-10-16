@@ -1,16 +1,9 @@
-import { EnterpriseChatView } from '@/components/enterprise-chat-view';
+import TechSupportApp from '@/components/tech-support-app';
+import { requireChatGPTUser } from '../chatgpt-auth';
 
 export const dynamic = 'force-dynamic';
 
-export default function EnterprisePage() {
-  return (
-    <div style={{ minHeight: '100vh', background: '#0b0f17' }}>
-      <EnterpriseChatView
-        organizationId="org-pilot-01"
-        organizationName="Acme Corp Enterprise Pilot"
-        userId="user-test-requester"
-        userRole="requester"
-      />
-    </div>
-  );
+export default async function EnterprisePage() {
+  const user = await requireChatGPTUser('/enterprise');
+  return <TechSupportApp displayName={user.displayName} initialView="triage" />;
 }

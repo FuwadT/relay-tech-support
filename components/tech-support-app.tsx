@@ -50,6 +50,9 @@ import {
   getChecks,
   getMeasurementDefinitions,
 } from '@/lib/diagnostics';
+import { EnterpriseChatView } from './enterprise-chat-view';
+
+export type ViewState = 'overview' | 'cases' | 'new' | 'detail' | 'queue' | 'metrics' | 'triage';
 
 const labels: Record<CaseStatus, string> = {
   open: 'New',
@@ -90,8 +93,14 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
-export default function TechSupportApp({ displayName }: { displayName: string }) {
-  const [view, setView] = useState<'overview' | 'cases' | 'new' | 'detail' | 'queue' | 'metrics'>('overview');
+export default function TechSupportApp({
+  displayName,
+  initialView = 'overview',
+}: {
+  displayName: string;
+  initialView?: ViewState;
+}) {
+  const [view, setView] = useState<ViewState>(initialView);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [cases, setCases] = useState<CaseRecord[]>([]);
   const [queueCases, setQueueCases] = useState<CaseRecord[]>([]);
@@ -237,7 +246,12 @@ export default function TechSupportApp({ displayName }: { displayName: string })
         if (!mounted) return;
         setCurrentUser(authData.user);
         setSelected(null);
-        setView('overview');
+        const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+        const requestedView = urlParams?.get('view') as ViewState | null;
+        const targetView = requestedView && ['overview', 'cases', 'new', 'detail', 'queue', 'metrics', 'triage'].includes(requestedView)
+          ? requestedView
+          : initialView;
+        setView(targetView);
         generation.current++;
 
         const casesData = await request<{ cases: CaseRecord[] }>('/api/cases');
@@ -593,6 +607,17 @@ export default function TechSupportApp({ displayName }: { displayName: string })
             <LayoutDashboard size={19} />
             Overview
           </button>
+          <button
+            aria-current={view === 'triage' ? 'page' : undefined}
+            className={view === 'triage' ? 'nav-item active' : 'nav-item'}
+            onClick={() => navigate('triage')}
+          >
+            <Sparkles size={19} />
+            AI Triage
+            <span className="nav-count" style={{ background: '#fbf2eb', color: '#a44526', borderColor: '#eedad0' }}>
+              Live
+            </span>
+          </button>
           {isStaff && (
             <button
               className={view === 'queue' ? 'nav-item active' : 'nav-item'}
@@ -659,6 +684,8 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                 ? 'Operational metrics'
                 : view === 'cases'
                 ? 'My cases'
+                : view === 'triage'
+                ? 'AI Diagnostic Assistant'
                 : 'Overview'}
             </span>
           </div>
@@ -760,6 +787,36 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                   </div>
                 </div>
               </section>
+              <div
+                className="panel"
+                style={{
+                  marginBottom: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '20px',
+                  borderLeft: '4px solid #a44526',
+                  background: '#ffffff',
+                }}
+              >
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                    <Sparkles size={18} style={{ color: '#a44526' }} />
+                    <strong style={{ fontSize: '15px' }}>Interactive AI Triage & Telemetry</strong>
+                    <span className="badge" style={{ background: '#fbf2eb', color: '#a44526', fontSize: '10px' }}>
+                      Non-Elevated
+                    </span>
+                  </div>
+                  <p style={{ fontSize: '13px', margin: 0, color: '#65635f' }}>
+                    Diagnose system issues interactively with zero-install guidance, local read-only telemetry scripts, and evidence-linked findings.
+                  </p>
+                </div>
+                <button className="button primary" onClick={() => navigate('triage')}>
+                  Launch AI Assistant
+                  <ArrowRight size={16} />
+                </button>
+              </div>
+
               <div className="section-heading">
                 <h2>Choose a problem</h2>
                 <span>Two places to start</span>
@@ -815,6 +872,17 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                 </div>
               )}
             </>
+          )}
+
+          {/* VIEW: AI TRIAGE & TELEMETRY */}
+          {view === 'triage' && (
+            <EnterpriseChatView
+              organizationId="org-pilot-01"
+              organizationName="Relay Interactive Assistant"
+              userId={currentUser?.userId || 'user-customer'}
+              userRole={currentUser?.role === 'admin' ? 'administrator' : currentUser?.role === 'support' ? 'technician' : 'requester'}
+              onNavigateHome={() => navigate('overview')}
+            />
           )}
 
           {/* VIEW: MY CASES */}
@@ -1111,6 +1179,38 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                   <p>Start with your device and the problem you’re seeing.</p>
                 </div>
               </div>
+              <div
+                style={{
+                  marginBottom: '22px',
+                  padding: '14px 18px',
+                  background: '#faf9f6',
+                  border: '1px solid #dcdad5',
+                  borderRadius: '4px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: '16px',
+                }}
+              >
+                <div>
+                  <strong style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Sparkles size={15} style={{ color: '#a44526' }} />
+                    Want conversational investigation with live telemetry?
+                  </strong>
+                  <p style={{ fontSize: '12px', margin: '3px 0 0', color: '#65635f' }}>
+                    You can use Relay’s interactive assistant for zero-install resolution and read-only device collector scripts.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="button secondary"
+                  style={{ minHeight: '36px', padding: '6px 12px', fontSize: '12px' }}
+                  onClick={() => navigate('triage')}
+                >
+                  Switch to AI Triage
+                  <ArrowRight size={14} />
+                </button>
+              </div>
               <div className="intake-grid">
                 <form className="panel intake" onSubmit={create}>
                   {draftRestored && <p role="status">Restored your unfinished draft from this browser tab.</p>}
@@ -1282,10 +1382,16 @@ export default function TechSupportApp({ displayName }: { displayName: string })
                     Created {date(selected.createdAt)} · Updated {date(selected.updatedAt)}
                   </p>
                 </div>
-                <button className="button secondary" onClick={exportCase}>
-                  <ArrowDownToLine size={17} />
-                  Export case
-                </button>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <button className="button secondary" onClick={() => navigate('triage')}>
+                    <Sparkles size={16} />
+                    AI Triage
+                  </button>
+                  <button className="button secondary" onClick={exportCase}>
+                    <ArrowDownToLine size={17} />
+                    Export case
+                  </button>
+                </div>
               </div>
 
               <div className="detail-grid">

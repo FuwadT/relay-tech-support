@@ -2,31 +2,48 @@
 
 /**
  * Enterprise Conversational Investigation & Remediation View.
- * Implements Task E3-01:
- * - Single-screen conversational chatbox
+ * Implements Task E3-01 & User Feedback:
+ * - Single-screen conversational chatbox integrated into Relay workspace
  * - Symptom chips for rapid, guided intake
  * - Zero-install resolution first ("Bigger Win")
  * - Progressive OS and device authorization intake
- * - Read-only collector instructions (download-inspect-run)
+ * - Local-origin read-only collector instructions (no external expired SSL certs)
+ * - Direct "Download Script" and "Copy Script" buttons
+ * - "Paste Collector Output" for instant real-device telemetry ingestion
  * - Evidence-linked telemetry findings (observations vs hypotheses)
  * - Offline HTML diagnostic artifact preview and export
  * - Reviewed remediation with transparent local execution
- * - Strict adherence to canonical contracts in lib/enterprise/contracts.ts
+ * - Cohesive styling matching Relay's authentic design language
  */
 
 import React, { useState, useRef, useEffect } from 'react';
+import {
+  ArrowDownToLine,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  Cpu,
+  HardDrive,
+  Network,
+  RotateCw,
+  Sparkles,
+  Terminal,
+  UploadCloud,
+  Wifi,
+} from 'lucide-react';
 import type {
   DevicePlatform,
   EnterpriseCase,
-  EnterpriseCaseInput,
   EvidenceFinding,
   EvidenceSource,
-  ProcessSample,
   RemediationProposal,
   TelemetrySnapshot,
 } from '@/lib/enterprise/contracts';
 import { analyzeEnterpriseTelemetry } from '@/lib/enterprise/findings';
 import { buildEnterpriseReportHtml } from '@/lib/enterprise/diagnostic-report';
+import { getCollectorScript } from '@/lib/enterprise/collector-scripts';
 
 export interface EnterpriseChatViewProps {
   organizationId?: string;
@@ -48,11 +65,11 @@ interface ChatMessage {
 }
 
 const SYMPTOM_CHIPS = [
-  { label: '🚀 High CPU & Freezing', prompt: 'My computer is freezing up with very high CPU utilization and loud fan noise.' },
-  { label: '💾 Disk Storage Full', prompt: 'I am running out of hard drive space and cannot save files or updates.' },
-  { label: '🌐 DNS / Connection Loss', prompt: 'I have lost internet connectivity; web pages cannot resolve domain names.' },
-  { label: '🧠 App Memory Leak', prompt: 'An application is consuming all available RAM over time and causing system slowdown.' },
-  { label: '⚡ Browser / Cache Glitch', prompt: 'A web portal is failing to load properly; I need help clearing localized browser cache and permissions.' },
+  { label: '🚀 High CPU & Fan Noise', prompt: 'My computer is freezing up with very high CPU utilization and loud fan noise.' },
+  { label: '💾 Low Disk Space', prompt: 'I am running out of hard drive space and cannot save files or system updates.' },
+  { label: '🌐 Wi-Fi & DNS Drops', prompt: 'I have lost internet connectivity; web pages cannot resolve domain names.' },
+  { label: '🧠 Memory Leak', prompt: 'An application is consuming all available RAM over time and causing system slowdown.' },
+  { label: '⚡ Browser Glitch', prompt: 'A web portal is failing to load properly; I need help clearing localized browser cache and permissions.' },
 ];
 
 /** Sample synthetic telemetry datasets for browser simulation (explicitly flagged synthetic). */
@@ -129,7 +146,7 @@ export function EnterpriseChatView({
     {
       id: 'welcome',
       sender: 'assistant',
-      text: `Hello! I am Relay's enterprise diagnostic assistant for **${organizationName}**.\n\nPlease describe the issue you are experiencing, or select one of the common symptoms below. If this can be solved with browser or system configuration steps, I will resolve it immediately with zero downloads!`,
+      text: `Hello! I am Relay's interactive diagnostic assistant for **${organizationName}**.\n\nPlease describe the issue you are experiencing, or select one of the common symptoms below. If this can be solved with browser or system configuration steps, I will resolve it immediately with zero downloads!`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
@@ -144,9 +161,22 @@ export function EnterpriseChatView({
   const [activeRemediation, setActiveRemediation] = useState<RemediationProposal | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const [caseSaving, setCaseSaving] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<string | null>(null);
+
+  // Script interaction state
+  const [copiedScript, setCopiedScript] = useState(false);
+  const [showScriptCode, setShowScriptCode] = useState(false);
+  const [pasteTelemetryOpen, setPasteTelemetryOpen] = useState(false);
+  const [pastedTelemetryText, setPastedTelemetryText] = useState('');
+  const [pasteError, setPasteError] = useState('');
+  const [currentOrigin, setCurrentOrigin] = useState('http://127.0.0.1:8790');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setCurrentOrigin(window.location.origin);
+    }
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -234,7 +264,7 @@ export function EnterpriseChatView({
     handleSendMessage(chip.prompt);
   };
 
-  // Handles explicit device authorization and case persistence
+  // Handles explicit device authorization and case initialization
   const handleAuthorizeAndInvestigate = async () => {
     if (!deviceAuthorized || !storageConsent) {
       alert('Please check both required authorization checkboxes before proceeding.');
@@ -242,8 +272,6 @@ export function EnterpriseChatView({
     }
 
     setCaseSaving(true);
-    setSaveStatus('Registering enterprise case via /api/v2...');
-
     const newCaseId = crypto.randomUUID();
     const caseRecord: EnterpriseCase = {
       id: newCaseId,
@@ -259,7 +287,6 @@ export function EnterpriseChatView({
 
     setActiveCase(caseRecord);
     setCaseSaving(false);
-    setSaveStatus(null);
 
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     setMessages((prev) => [
@@ -267,11 +294,102 @@ export function EnterpriseChatView({
       {
         id: crypto.randomUUID(),
         sender: 'assistant',
-        text: `Device authorized. I have initiated Case **#${newCaseId.slice(0, 8)}**.\n\nYou can run the read-only collector script locally on your ${selectedPlatform} device, or run an immediate browser-based simulation to preview findings:`,
+        text: `Device authorized. I have initiated Investigation Case **#${newCaseId.slice(0, 8)}**.\n\nYou can run the non-elevated read-only collector on your ${selectedPlatform} device, paste terminal output, or run a browser simulation:`,
         timestamp: now,
         cardType: 'collector',
       },
     ]);
+  };
+
+  // Direct script file download
+  const handleDownloadScript = () => {
+    const scriptInfo = getCollectorScript(selectedPlatform);
+    if (!scriptInfo) return;
+    const blob = new Blob([scriptInfo.content], { type: scriptInfo.contentType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = scriptInfo.filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // Copy raw script content to clipboard
+  const handleCopyScript = () => {
+    const scriptInfo = getCollectorScript(selectedPlatform);
+    if (!scriptInfo) return;
+    navigator.clipboard.writeText(scriptInfo.content).then(() => {
+      setCopiedScript(true);
+      setTimeout(() => setCopiedScript(false), 2200);
+    });
+  };
+
+  // Ingest pasted terminal JSON output
+  const handleIngestPastedTelemetry = () => {
+    try {
+      setPasteError('');
+      const trimmed = pastedTelemetryText.trim();
+      if (!trimmed) {
+        setPasteError('Please paste the JSON output emitted by the collector script.');
+        return;
+      }
+      const parsed = JSON.parse(trimmed) as TelemetrySnapshot;
+      if (!parsed.schemaVersion || !parsed.platform) {
+        setPasteError('Invalid telemetry JSON: missing schemaVersion or platform.');
+        return;
+      }
+
+      parsed.source = 'collector';
+      const findings = analyzeEnterpriseTelemetry(parsed);
+
+      setActiveSnapshot(parsed);
+      setActiveFindings(findings);
+      setPasteTelemetryOpen(false);
+      setPastedTelemetryText('');
+
+      const remediation: RemediationProposal = {
+        id: `prop-${crypto.randomUUID().slice(0, 8)}`,
+        catalogActionId:
+          parsed.cpuPercent && parsed.cpuPercent > 80
+            ? 'catalog-proc-soft-restart'
+            : parsed.diskFreeGb && parsed.diskFreeGb < 20
+              ? 'catalog-disk-clean-user-temp'
+              : !parsed.dnsResolved
+                ? 'catalog-net-flush-dns'
+                : 'catalog-mem-drop-cache',
+        catalogVersion: '1.0.0',
+        platform: selectedPlatform,
+        evidenceIds: findings.flatMap((f) => f.evidenceIds),
+        parameters: { targetProcess: parsed.processes?.[0]?.name || 'system' },
+        consequences: [
+          'Evaluates and addresses the identified constraint in user space.',
+          'No elevated privileges or driver changes requested.',
+        ],
+        rollbackInstructions: ['Reversible or non-destructive action.'],
+        followUpCheckIds: ['cpu_utilization_check', 'gateway_ping_check'],
+        requiresElevation: false,
+      };
+
+      setActiveRemediation(remediation);
+
+      const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          sender: 'assistant',
+          text: `Telemetry collected! (Source: **device-reported collector snapshot**). Here are the evidence-linked observations and verified catalog remediation options:`,
+          timestamp: now,
+          cardType: 'findings',
+          findings,
+          remediation,
+        },
+      ]);
+    } catch (err: unknown) {
+      setPasteError(err instanceof Error ? err.message : 'Invalid JSON format. Please verify the output.');
+    }
   };
 
   // Run simulated telemetry in browser
@@ -287,7 +405,6 @@ export function EnterpriseChatView({
       setActiveFindings(findings);
       setIsSimulating(false);
 
-      // Generate a catalog-based remediation proposal matching the scenario
       const remediation: RemediationProposal = {
         id: `prop-${crypto.randomUUID().slice(0, 8)}`,
         catalogActionId:
@@ -330,7 +447,7 @@ export function EnterpriseChatView({
           remediation,
         },
       ]);
-    }, 600);
+    }, 500);
   };
 
   // Downloads the offline standalone HTML diagnostic report
@@ -348,6 +465,8 @@ export function EnterpriseChatView({
     URL.revokeObjectURL(url);
   };
 
+  const scriptInfo = getCollectorScript(selectedPlatform);
+
   return (
     <div className="enterprise-chat-container">
       {/* Top Banner */}
@@ -355,15 +474,15 @@ export function EnterpriseChatView({
         <div className="header-meta">
           <span className="badge badge-org">{organizationName}</span>
           <span className="badge badge-role">{userRole.toUpperCase()}</span>
-          <span className="badge badge-platform">{selectedPlatform}</span>
+          <span className="badge badge-platform">{selectedPlatform.toUpperCase()}</span>
         </div>
         <div className="header-title">
-          <h2>⚡ Relay Enterprise AI Triage & Investigation</h2>
-          <span className="text-muted text-sm">Strictly Read-Only · Zero-Install Resolution First · 30-day Retention</span>
+          <h2>Relay Diagnostic Assistant</h2>
+          <span className="text-muted text-sm">Non-Elevated · Zero-Install Resolution First · Evidence-Linked</span>
         </div>
         {onNavigateHome && (
-          <button onClick={onNavigateHome} className="btn-secondary btn-sm">
-            Exit to Workspace
+          <button onClick={onNavigateHome} className="button secondary btn-sm">
+            Exit to Overview
           </button>
         )}
       </header>
@@ -385,7 +504,7 @@ export function EnterpriseChatView({
         </div>
       </div>
 
-      {/* Messages Scroll Area */}
+      {/* Chat Messages Log */}
       <div className="chat-messages-area">
         {messages.map((m) => (
           <div key={m.id} className={`chat-bubble-row ${m.sender}`}>
@@ -404,63 +523,76 @@ export function EnterpriseChatView({
               {m.cardType === 'zero-install' && m.zeroInstallSteps && (
                 <div className="interactive-card zero-install-card">
                   <div className="card-badge">✨ Zero-Install Quick Resolution</div>
-                  <ul className="steps-list">
-                    {m.zeroInstallSteps.map((step, sIdx) => (
-                      <li key={sIdx}>{step}</li>
+                  <ol className="steps-list">
+                    {m.zeroInstallSteps.map((s, idx) => (
+                      <li key={idx}>{s}</li>
                     ))}
-                  </ul>
+                  </ol>
                   <div className="card-actions">
                     <button
-                      className="btn-success btn-sm"
+                      className="button primary btn-sm"
                       onClick={() => {
                         setMessages((prev) => [
                           ...prev,
                           {
                             id: crypto.randomUUID(),
+                            sender: 'user',
+                            text: 'I completed these steps and my issue is resolved. Thank you!',
+                            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                          },
+                          {
+                            id: crypto.randomUUID(),
                             sender: 'assistant',
-                            text: '🎉 Wonderful! I have logged this case as resolved via quick settings with zero software installed.',
+                            text: 'Wonderful! Glad we could resolve this quickly without any software installation. Have a great day!',
                             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                           },
                         ]);
                       }}
                     >
-                      ✓ Resolved via Quick Steps
+                      <Check size={14} />
+                      That fixed it!
                     </button>
                     <button
-                      className="btn-secondary btn-sm"
+                      className="button secondary btn-sm"
                       onClick={() => {
                         setMessages((prev) => [
                           ...prev,
                           {
                             id: crypto.randomUUID(),
+                            sender: 'user',
+                            text: 'That did not resolve it. I need deeper technical diagnostics.',
+                            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                          },
+                          {
+                            id: crypto.randomUUID(),
                             sender: 'assistant',
-                            text: 'Understood. Let us proceed to deep device-level inspection. Please select your operating system and confirm authorization:',
+                            text: 'Understood. Let’s proceed to a non-elevated diagnostic inspection to pinpoint the issue. Please authorize your device below:',
                             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                             cardType: 'device-auth',
                           },
                         ]);
                       }}
                     >
-                      Still Need Hardware Inspection →
+                      Still having issues
                     </button>
                   </div>
                 </div>
               )}
 
-              {/* Device Authorization Card */}
+              {/* Progressive Device Authorization Card */}
               {m.cardType === 'device-auth' && (
                 <div className="interactive-card auth-card">
-                  <h4>Select Device Platform & Authorization</h4>
+                  <h4>Device Platform & Authorization</h4>
                   <div className="form-group">
-                    <label>Operating System:</label>
+                    <label>Target Operating System:</label>
                     <select
                       value={selectedPlatform}
                       onChange={(e) => setSelectedPlatform(e.target.value as DevicePlatform)}
                       className="select-input"
                     >
-                      <option value="windows">Windows 11 (PowerShell)</option>
-                      <option value="macos">macOS 15+ (Apple Silicon zsh)</option>
-                      <option value="ubuntu">Ubuntu 22.04 / 24.04 (Linux bash)</option>
+                      <option value="windows">Windows 11 (x64 PowerShell 5.1+)</option>
+                      <option value="macos">macOS 15+ (Apple Silicon arm64)</option>
+                      <option value="ubuntu">Ubuntu Linux 22.04 / 24.04 LTS (x64)</option>
                     </select>
                   </div>
                   <div className="checkbox-group">
@@ -482,7 +614,7 @@ export function EnterpriseChatView({
                     </label>
                   </div>
                   <button
-                    className="btn-primary"
+                    className="button primary btn-sm"
                     disabled={!deviceAuthorized || !storageConsent || caseSaving}
                     onClick={handleAuthorizeAndInvestigate}
                   >
@@ -495,44 +627,132 @@ export function EnterpriseChatView({
               {m.cardType === 'collector' && (
                 <div className="interactive-card collector-card">
                   <div className="card-badge">🔬 Read-Only Collector Script</div>
-                  <p className="text-sm">
-                    Run the non-elevated diagnostic script in your terminal to collect resource metrics, bounded process names, and redacted logs.
+                  <p className="text-sm" style={{ color: '#65635f', margin: '4px 0 10px' }}>
+                    Run the non-elevated diagnostic script on your machine to gather resource metrics, bounded process names, and redacted logs.
                   </p>
+
+                  {/* Direct script actions */}
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '10px' }}>
+                    <button className="button secondary btn-sm" onClick={handleDownloadScript}>
+                      <ArrowDownToLine size={14} />
+                      Download Script ({scriptInfo?.filename})
+                    </button>
+                    <button className="button secondary btn-sm" onClick={handleCopyScript}>
+                      {copiedScript ? <Check size={14} style={{ color: '#166534' }} /> : <Copy size={14} />}
+                      {copiedScript ? 'Copied to clipboard!' : 'Copy raw script'}
+                    </button>
+                    <button
+                      className="button secondary btn-sm"
+                      onClick={() => setShowScriptCode(!showScriptCode)}
+                    >
+                      <Terminal size={14} />
+                      {showScriptCode ? 'Hide script preview' : 'Inspect script source'}
+                    </button>
+                  </div>
+
+                  {/* Expandable script source preview */}
+                  {showScriptCode && scriptInfo && (
+                    <div style={{ margin: '10px 0', border: '1px solid #dcdad5', borderRadius: '4px', overflow: 'hidden' }}>
+                      <div style={{ padding: '6px 10px', background: '#eeede9', fontSize: '11px', fontWeight: 600, color: '#4a4641' }}>
+                        Previewing {scriptInfo.filename} ({scriptInfo.content.split('\n').length} lines)
+                      </div>
+                      <pre style={{ margin: 0, padding: '10px', background: '#1c1b1a', color: '#f5f4f1', maxHeight: '220px', overflowY: 'auto', fontSize: '11px', lineHeight: 1.4 }}>
+                        {scriptInfo.content}
+                      </pre>
+                    </div>
+                  )}
+
+                  {/* Terminal Execution Snippet */}
                   <div className="collector-code-block">
                     <code>
                       {selectedPlatform === 'windows'
-                        ? `# Download and inspect before running:\nirm https://relay.support/collectors/windows11.ps1 -OutFile inspect.ps1\nGet-Content inspect.ps1\n.\\inspect.ps1`
+                        ? `# 1. Download non-elevated collector from this Relay instance:\nirm ${currentOrigin}/api/collectors/windows11.ps1 -OutFile inspect.ps1\n\n# 2. Review and run:\nGet-Content inspect.ps1\n.\\inspect.ps1`
                         : selectedPlatform === 'macos'
-                          ? `# Download and inspect before running:\ncurl -sSL https://relay.support/collectors/macos.sh -o inspect.sh\nless inspect.sh\nzsh inspect.sh`
-                          : `# Download and inspect before running:\ncurl -sSL https://relay.support/collectors/ubuntu.sh -o inspect.sh\nless inspect.sh\nbash inspect.sh`}
+                          ? `# 1. Download non-elevated collector from this Relay instance:\ncurl -sSL ${currentOrigin}/api/collectors/macos.sh -o inspect.sh\n\n# 2. Review and run:\nless inspect.sh\nzsh inspect.sh`
+                          : `# 1. Download non-elevated collector from this Relay instance:\ncurl -sSL ${currentOrigin}/api/collectors/ubuntu.sh -o inspect.sh\n\n# 2. Review and run:\nless inspect.sh\nbash inspect.sh`}
                     </code>
                   </div>
-                  <div className="card-actions">
-                    <button
-                      className="btn-primary btn-sm"
-                      onClick={() => handleRunSimulation('cpu')}
-                      disabled={isSimulating}
-                    >
-                      {isSimulating ? 'Simulating...' : 'Simulate High CPU Telemetry'}
-                    </button>
-                    <button
-                      className="btn-secondary btn-sm"
-                      onClick={() => handleRunSimulation('disk')}
-                      disabled={isSimulating}
-                    >
-                      Simulate Low Disk
-                    </button>
-                    <button
-                      className="btn-secondary btn-sm"
-                      onClick={() => handleRunSimulation('dns')}
-                      disabled={isSimulating}
-                    >
-                      Simulate DNS Fault
-                    </button>
+
+                  {/* Paste Terminal Output Section */}
+                  <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px solid #ede9e3' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '12px', fontWeight: 600, color: '#38332d' }}>
+                        Ran the script in your terminal?
+                      </span>
+                      <button
+                        className="button secondary btn-xs"
+                        onClick={() => setPasteTelemetryOpen(!pasteTelemetryOpen)}
+                      >
+                        <UploadCloud size={13} />
+                        {pasteTelemetryOpen ? 'Close JSON box' : 'Paste Terminal JSON Output'}
+                      </button>
+                    </div>
+
+                    {pasteTelemetryOpen && (
+                      <div style={{ marginTop: '10px' }}>
+                        <p style={{ fontSize: '11px', color: '#65635f', margin: '0 0 6px' }}>
+                          Copy the JSON output printed in your terminal and paste it below:
+                        </p>
+                        <textarea
+                          rows={4}
+                          value={pastedTelemetryText}
+                          onChange={(e) => {
+                            setPastedTelemetryText(e.target.value);
+                            setPasteError('');
+                          }}
+                          placeholder='{"schemaVersion":1,"platform":"windows","cpuPercent":88.4,...}'
+                          style={{ fontFamily: 'monospace', fontSize: '11px' }}
+                        />
+                        {pasteError && (
+                          <p style={{ color: '#a44526', fontSize: '11px', marginTop: '4px', fontWeight: 600 }}>
+                            {pasteError}
+                          </p>
+                        )}
+                        <div style={{ marginTop: '8px' }}>
+                          <button
+                            className="button primary btn-sm"
+                            onClick={handleIngestPastedTelemetry}
+                          >
+                            <Sparkles size={13} />
+                            Analyze Real Device Telemetry
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <span className="text-xs text-muted">
-                    ⚡ Simulation runs locally in browser with synthetic data fixtures (source: synthetic).
-                  </span>
+
+                  {/* Quick Simulation Fallback */}
+                  <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px solid #ede9e3' }}>
+                    <span style={{ fontSize: '11px', color: '#76736d', display: 'block', marginBottom: '8px' }}>
+                      Or test diagnostic scenarios right now with browser-simulated fixtures:
+                    </span>
+                    <div className="card-actions">
+                      <button
+                        className="button secondary btn-sm"
+                        onClick={() => handleRunSimulation('cpu')}
+                        disabled={isSimulating}
+                      >
+                        <Cpu size={13} />
+                        {isSimulating ? 'Simulating...' : 'Simulate High CPU'}
+                      </button>
+                      <button
+                        className="button secondary btn-sm"
+                        onClick={() => handleRunSimulation('disk')}
+                        disabled={isSimulating}
+                      >
+                        <HardDrive size={13} />
+                        Simulate Low Disk
+                      </button>
+                      <button
+                        className="button secondary btn-sm"
+                        onClick={() => handleRunSimulation('dns')}
+                        disabled={isSimulating}
+                      >
+                        <Wifi size={13} />
+                        Simulate DNS Fault
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -541,8 +761,9 @@ export function EnterpriseChatView({
                 <div className="interactive-card findings-card">
                   <div className="findings-header">
                     <h4>Evidence-Linked Telemetry Findings</h4>
-                    <button className="btn-secondary btn-xs" onClick={handleDownloadReport}>
-                      ⬇ Download Diagnostic Artifact (.html)
+                    <button className="button secondary btn-xs" onClick={handleDownloadReport}>
+                      <ArrowDownToLine size={13} />
+                      Export Diagnostic HTML Artifact
                     </button>
                   </div>
 
@@ -606,7 +827,7 @@ export function EnterpriseChatView({
                       </p>
                       <div className="card-actions" style={{ marginTop: '10px' }}>
                         <button
-                          className="btn-success btn-sm"
+                          className="button primary btn-sm"
                           onClick={() => {
                             setMessages((prev) => [
                               ...prev,
@@ -619,6 +840,7 @@ export function EnterpriseChatView({
                             ]);
                           }}
                         >
+                          <CheckCircle2 size={14} />
                           Execute Remediation Locally
                         </button>
                       </div>
@@ -645,10 +867,10 @@ export function EnterpriseChatView({
             type="text"
             value={inputPrompt}
             onChange={(e) => setInputPrompt(e.target.value)}
-            placeholder="Describe your issue or question (e.g. 'high CPU usage', 'cannot resolve DNS')..."
+            placeholder="Describe your issue (e.g. 'high CPU usage', 'cannot resolve DNS', 'browser slow')..."
             className="chat-input"
           />
-          <button type="submit" className="btn-primary" disabled={!inputPrompt.trim()}>
+          <button type="submit" className="button primary btn-sm" disabled={!inputPrompt.trim()}>
             Send
           </button>
         </form>
