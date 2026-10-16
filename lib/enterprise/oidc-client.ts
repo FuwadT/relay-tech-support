@@ -125,6 +125,7 @@ export function createEnterpriseOidcClient(configuration: OidcConfiguration,
           const claims = oauth.getValidatedIdTokenClaims(result);
           const now = Date.now() / 1000;
           if (!claims || claims.iss !== issuer || typeof claims.sub !== 'string' || !claims.sub.length ||
+            (claims.azp !== undefined && claims.azp !== config.clientId) ||
             claims.sub.length > 255 || /[\u0000-\u001f\u007f]/.test(claims.sub) ||
             !Number.isFinite(claims.exp) || claims.exp <= now || !Number.isFinite(claims.iat) || claims.iat > now + 30 ||
             claims.exp <= claims.iat) throw failure();

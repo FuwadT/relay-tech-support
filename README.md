@@ -1,5 +1,7 @@
 # Relay — guided support candidate
 
+The product scope changed on October15,2026 to a multi-organization investigation platform. The approved target and phased acceptance gates are in [ENTERPRISE-PLAN.md](docs/ENTERPRISE-PLAN.md); execution is tracked in [ENTERPRISE-BACKLOG.md](docs/board/ENTERPRISE-BACKLOG.md). The separate enterprise foundation is documented in [enterprise/README.md](enterprise/README.md). It is under development and has not replaced the existing private hosted demo. Descriptions below refer to the guided Sites candidate.
+
 Relay helps a signed-in owner record a personal Windows 11 slowdown or home-connectivity problem, follow four guided checks, and save observations and outcomes. This is a private development candidate, not an external customer release.
 
 ## Supported capabilities

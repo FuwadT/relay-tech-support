@@ -87,10 +87,14 @@ test('OIDC rejects wrong audience, issuer, nonce, expired token and invalid subj
   for (const claims of [{ aud: 'attacker-client' }, { iss: 'https://evil.example' }, { nonce: 'wrong-nonce' },
     { exp: Math.floor(Date.now() / 1000) - 1 }, { sub: '' }, { sub: 'x'.repeat(256) },
     { iat: Math.floor(Date.now() / 1000) + 3600 }, { exp: 'never' }, { exp: null }, { aud: [] },
-    { aud: ['synthetic-client', 'other-client'], azp: 'other-client' }]) {
+    { aud: ['synthetic-client', 'other-client'], azp: 'other-client' },
+    { aud: 'synthetic-client', azp: 'other-client' },
+    { nbf: Math.floor(Date.now() / 1000) + 3600 }]) {
     const f = await fixture('google', claims);
     await assert.rejects(f.client.exchange(f.callback, f.transaction), { message: 'OIDC authentication failed.' });
   }
+  const wrongTenant = await fixture('entra', { iss: entraIssuer.replace(tenant, 'ffffffff-ffff-4fff-8fff-ffffffffffff') });
+  await assert.rejects(wrongTenant.client.exchange(wrongTenant.callback, wrongTenant.transaction), { message: 'OIDC authentication failed.' });
 });
 
 test('OIDC explicitly rejects invalid signatures and absent ID tokens', async () => {
@@ -128,7 +132,7 @@ test('OIDC configuration requires a tenant-specific Entra issuer and an exact HT
 
 test('OIDC discovery cannot supply unapproved endpoints or cause redirect-following', async () => {
   for (const metadata of [{ issuer: 'https://evil.example' }, { token_endpoint: 'https://evil.example/token' },
-    { jwks_uri: 'http://www.googleapis.com/keys' }, { authorization_endpoint: 'https://accounts.google.com.evil.example/auth' },
+    { jwks_uri: 'http://www.googleapis.com/keys' }, { jwks_uri: 'https://evil.example/keys' }, { authorization_endpoint: 'https://accounts.google.com.evil.example/auth' },
     { token_endpoint: 'https://oauth2.googleapis.com:444/token' }]) {
     await assert.rejects(fixture('google', {}, { metadata }), { message: 'OIDC authentication failed.' });
   }

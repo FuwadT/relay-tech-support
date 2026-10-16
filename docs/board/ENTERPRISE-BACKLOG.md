@@ -10,15 +10,19 @@ Authoritative new scope: ../ENTERPRISE-PLAN.md. Original sprint files remain his
 | E2-01 | Codex | 120 | Separate SQLite/D1 foundation schema; constraints and fresh-migration tests | Complete:98ac1a5 + local D1 runtime |
 | E2-02 | Codex | 120 | Hashed opaque session lookup and membership authorization; missing/expired/revoked/cross-tenant tests | Complete:1524fa7 + local D1 runtime; issuance separate |
 | E2-03 | Codex | 120 | Tenant-scoped case create/list/detail, bounded validation and safe audit; denied read/write tests | Complete:1524fa7 +55 local D1 checks |
-| E2-04 | Codex | 120 | Verified Entra OIDC callback and session creation; mock issuer negative tests, real acceptance separate | In progress: provider adapter delegated; persistence/wiring pending |
-| E2-05 | Codex | 120 | Verified Google OIDC callback and organization invitation; no domain auto-enrollment | Not started |
+| E2-04a | Codex agent | 120 | Entra/Google provider adapter, pinned issuer/RS256/PKCE/state/nonce; signed negative fixtures | Complete:d0b3ce8 + coordinator azp correction |
+| E2-04b | Codex | 120 | Expiring encrypted browser-bound login transactions; atomic one-time consumption and replay tests | Not started |
+| E2-04c | Codex | 120 | Entra callback/session issuance for active pre-provisioned issuer/subject memberships; no domain grants | Not started |
+| E2-05a | Codex | 120 | Google callback/session issuance using same verified transaction boundary | Not started |
+| E2-05b | Codex | 120 | Organization invitation/admin provisioning without role escalation or domain auto-enrollment | Not started |
+| E2-05c | Codex | 60 | Same-origin logout, session revocation and expiry UX | Not started |
 | E2-06 | Codex | 90 | Enterprise deployment template, isolated bindings and configuration validation | In progress: local template/runtime passes; production binding absent |
 | E3-01 | Gemini | 120 | Chat UI using agreed v2 contracts, explicit device authorization and saved conversation | Not started |
 | E4-01 | Codex agent | 120 | Bounded telemetry parser, null/error semantics and hostile-input tests | Complete:ef21129 +8focused tests |
-| E4-02 | Delegated | 120 | Correct sampled Windows collector with local preview; native Windows evidence | Not started |
+| E4-02 | Codex agent | 120 | Correct sampled Windows collector with local preview; native Windows evidence | In progress: static no-upload script, known/unknown sample math |
 | E4-03 | Delegated | 120 | macOS collector with permissions/unknown states; native release gates documented | Not started |
 | E4-04 | Delegated | 120 | Ubuntu collector with bounded output; native release gates documented | Not started |
-| E5-01 | Codex agent | 120 | Evidence-linked findings and no fabricated missing-data diagnoses | In progress: pure conservative analyzer delegated |
+| E5-01 | Codex agent | 120 | Evidence-linked findings and no fabricated missing-data diagnoses | Complete:e0712d2 +6tests; not an ingestion endpoint |
 | E5-02 | Gemini | 120 | Escaped offline report and sandboxed preview; XSS/offline tests | Not started |
 
 Milestones6–9 are specified in ENTERPRISE-PLAN.md; split into30–120minute issues before claiming implementation. No milestone is complete until its actual acceptance passes. Native OS, live SSO, vendor access, retention and restore remain explicit external gates.
