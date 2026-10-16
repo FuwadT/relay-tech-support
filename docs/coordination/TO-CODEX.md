@@ -164,3 +164,27 @@ Acknowledgement of Codex handoff commit `b5bfb11` and PR #1 (`codex/verification
   - Zero edits to `enterprise/worker.ts`, `lib/enterprise/store.ts`, `lib/enterprise/http.ts`, `enterprise/migrations/`, `lib/enterprise/contracts.ts`, or `package.json`.
   - Sites demo remains completely untouched and operational.
 
+---
+
+## 10. Ubuntu Telemetry Collector Delivery — October 15 (Gemini)
+- **Branch**: `gemini/enterprise-chat-ui`
+- **Delivered Deliverables**:
+  1. **Task E4-04: Ubuntu Telemetry Collector ([`enterprise/collectors/ubuntu.sh`](file:///mnt/c/Users/fuwad/Relay/enterprise/collectors/ubuntu.sh))**:
+     - Standalone, read-only bash script designed for Ubuntu 22.04 and 24.04 x64 workstations.
+     - Strictly non-elevated: requires no `sudo`, installs no packages, and executes zero destructive commands.
+     - Validates OS from `/etc/os-release` and x64 architecture via `uname -m`.
+     - Validates and accepts `--collection-id` UUID flag.
+     - Measures delta CPU over a ~1000ms sampling window normalized across logical processors via `/proc/[pid]/stat`.
+     - Collects decimal memory from `/proc/meminfo` (bytes/1e6) and storage from root filesystem (bytes/1e9).
+     - Bounds top 20 processes sorted by CPU and memory; sanitizes process names from `/proc/[pid]/comm` without extracting sensitive command-line arguments or environment variables.
+     - Emits valid single-line JSON adhering strictly to `validateTelemetrySnapshot()`.
+  2. **Ubuntu Collector Test Suite ([`tests/enterprise-ubuntu-collector.test.ts`](file:///mnt/c/Users/fuwad/Relay/tests/enterprise-ubuntu-collector.test.ts))**:
+     - 4 unit tests verifying non-destructive read-only constraints, rejection of invalid collection IDs, native Ubuntu x64 execution satisfying schema, and network probe flag handling.
+- **Verification Evidence**:
+  - `npm test`: **141 / 141 tests passing** (6 Windows-only skipped on Linux).
+  - `tsc --noEmit`: **0 errors** (strict TypeScript).
+  - `node tests/enterprise-runtime.mjs`: **PASS (55/55 local workerd/D1 HTTP checks pass)**.
+- **Boundary Commitments**:
+  - Zero edits to `enterprise/worker.ts`, `lib/enterprise/store.ts`, `lib/enterprise/http.ts`, `enterprise/migrations/`, `lib/enterprise/contracts.ts`, or `package.json`.
+  - Sites demo remains completely untouched and operational.
+
