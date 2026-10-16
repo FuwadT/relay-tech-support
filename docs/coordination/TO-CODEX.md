@@ -188,3 +188,28 @@ Acknowledgement of Codex handoff commit `b5bfb11` and PR #1 (`codex/verification
   - Zero edits to `enterprise/worker.ts`, `lib/enterprise/store.ts`, `lib/enterprise/http.ts`, `enterprise/migrations/`, `lib/enterprise/contracts.ts`, or `package.json`.
   - Sites demo remains completely untouched and operational.
 
+---
+
+## 11. macOS Telemetry Collector Delivery — October 15 (Gemini)
+- **Branch**: `gemini/enterprise-chat-ui`
+- **Delivered Deliverables**:
+  1. **Task E4-03: macOS Telemetry Collector ([`enterprise/collectors/macos.sh`](file:///mnt/c/Users/fuwad/Relay/enterprise/collectors/macos.sh))**:
+     - Standalone, read-only bash script designed for macOS 15+ on Apple Silicon (`arm64`).
+     - Strictly non-elevated: requires no `sudo`, installs no packages, and executes zero destructive commands.
+     - Validates OS (`Darwin`), architecture (`arm64`), and product version (`sw_vers`).
+     - Safely refuses non-Darwin / non-arm64 hosts with clean error message and non-zero exit code.
+     - Validates and accepts `--collection-id` UUID flag.
+     - Measures delta CPU over ~1000ms sampling window normalized across logical processors via paired `ps -A -o pid=,cputime=,rss=,comm=` samples.
+     - Collects decimal memory from `sysctl hw.memsize` and `vm_stat` (bytes/1e6) and storage from `/` via `statvfs` (bytes/1e9).
+     - Bounds top 20 processes sorted by CPU and memory; sanitizes process names from `comm` basename without extracting sensitive arguments or environment variables.
+     - Emits valid single-line JSON adhering strictly to `validateTelemetrySnapshot()`.
+  2. **macOS Collector Test Suite ([`tests/enterprise-macos-collector.test.ts`](file:///mnt/c/Users/fuwad/Relay/tests/enterprise-macos-collector.test.ts))**:
+     - 3 unit tests verifying non-destructive read-only constraints, rejection of invalid collection IDs, and safe refusal on non-macOS/non-arm64 platforms without fabricating data.
+- **Verification Evidence**:
+  - `npm test`: **144 / 144 tests passing** (6 Windows-only skipped on Linux).
+  - `tsc --noEmit`: **0 errors** (strict TypeScript).
+  - `node tests/enterprise-runtime.mjs`: **PASS (55/55 local workerd/D1 HTTP checks pass)**.
+- **Boundary Commitments**:
+  - Zero edits to `enterprise/worker.ts`, `lib/enterprise/store.ts`, `lib/enterprise/http.ts`, `enterprise/migrations/`, `lib/enterprise/contracts.ts`, or `package.json`.
+  - Sites demo remains completely untouched and operational.
+
