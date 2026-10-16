@@ -137,3 +137,30 @@ Acknowledgement of Codex handoff commit `b5bfb11` and PR #1 (`codex/verification
   - Zero edits to `enterprise/worker.ts`, `lib/enterprise/store.ts`, `lib/enterprise/http.ts`, `enterprise/migrations/`, or `package.json`.
   - Sites demo remains completely untouched and operational.
 
+---
+
+## 9. Assistant & Ticketing Integrations Delivery — October 15 (Gemini)
+- **Branch**: `gemini/enterprise-chat-ui`
+- **Delivered Deliverables**:
+  1. **Task E8-02: Ticketing Connectors & Idempotent Outbox ([`lib/enterprise/ticket-connectors.ts`](file:///mnt/c/Users/fuwad/Relay/lib/enterprise/ticket-connectors.ts))**:
+     - Connectors for ServiceNow ITSM, Jira Service Management Cloud, and Freshservice.
+     - Outbox pattern with `idempotencyKey` preventing duplicate ticket creation on network replays.
+     - `sanitizeTicketPayload()` strictly purges confidential internal notes and raw telemetry from outbound payloads.
+     - `validateTicketPayload()` enforces technician-approved summary requirement before queueing.
+     - Outbox dispatch simulation generating realistic provider ticket IDs (`INC...`, `RELAY-...`, `TICK-...`).
+     - Treats external ticket status as external state that cannot independently resolve cases.
+  2. **Task E8-01: Authenticated Assistant Tools ([`lib/enterprise/assistant-tools.ts`](file:///mnt/c/Users/fuwad/Relay/lib/enterprise/assistant-tools.ts))**:
+     - Scoped assistant tools (`relay_get_case_summary`, `relay_list_approved_remediations`, `relay_get_diagnostic_report_meta`).
+     - Ecosystem format exporters for ChatGPT (OpenAI Function format), Claude (Anthropic Tool Use format), Gemini (Function Declaration format), and Microsoft Copilot Studio (Bot Action format).
+     - Strictly zero shell/terminal/command execution exposed to assistants.
+     - `executeAssistantTool()` enforces organization isolation and non-elevated actions only.
+  3. **Milestone 8 Test Suite ([`tests/enterprise-integrations.test.ts`](file:///mnt/c/Users/fuwad/Relay/tests/enterprise-integrations.test.ts))**:
+     - 8 unit tests verifying ticket payload sanitization, idempotency keys, provider dispatch across all 3 ITSM systems, schema formatting for all 4 assistant ecosystems, execution bounds, and rejection of arbitrary commands.
+- **Verification Evidence**:
+  - `npm test`: **137 / 137 tests passing** (up from 129, 8 new integration tests across ticketing + assistant tools).
+  - `tsc --noEmit`: **0 errors** (strict TypeScript).
+  - `node tests/enterprise-runtime.mjs`: **PASS (55/55 local workerd/D1 HTTP checks pass)**.
+- **Boundary Commitments**:
+  - Zero edits to `enterprise/worker.ts`, `lib/enterprise/store.ts`, `lib/enterprise/http.ts`, `enterprise/migrations/`, `lib/enterprise/contracts.ts`, or `package.json`.
+  - Sites demo remains completely untouched and operational.
+
