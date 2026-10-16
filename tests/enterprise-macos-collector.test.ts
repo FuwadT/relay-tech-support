@@ -12,6 +12,7 @@ import { describe, it } from 'node:test';
 
 const script = resolve(process.cwd(), 'enterprise/collectors/macos.sh');
 const isMacOS = process.platform === 'darwin' && process.arch === 'arm64';
+const needsPosixShell = process.platform === 'win32' ? 'Requires a native POSIX shell; Windows bash may be a WSL launcher' : false;
 
 describe('E4-03: macOS Telemetry Collector', () => {
   it('collector script is read-only and does not invoke destructive or elevated commands', () => {
@@ -22,7 +23,7 @@ describe('E4-03: macOS Telemetry Collector', () => {
     assert.doesNotMatch(source, /\bcurl\b|\bwget\b/i, 'Must not perform unauthenticated network calls');
   });
 
-  it('rejects invalid collection-id with non-zero exit code and controlled error message', () => {
+  it('rejects invalid collection-id with non-zero exit code and controlled error message', { skip: needsPosixShell }, () => {
     const result = spawnSync('bash', [script, '--collection-id', 'invalid-uuid'], {
       encoding: 'utf8',
       timeout: 10000,
@@ -31,9 +32,8 @@ describe('E4-03: macOS Telemetry Collector', () => {
     assert.ok(result.stderr.includes('Invalid collection-id: must be a valid UUID.'));
   });
 
-  it('safely refuses execution on non-macOS or non-arm64 hosts without fabricating output', () => {
-    if (isMacOS) return; // Skip on real macOS arm64
-
+  it('safely refuses execution on non-macOS or non-arm64 hosts without fabricating output',
+    { skip: needsPosixShell || (isMacOS ? 'This assertion requires an unsupported platform' : false) }, () => {
     const result = spawnSync('bash', [script, '--collection-id', '00000000-0000-4000-8000-000000000003'], {
       encoding: 'utf8',
       timeout: 10000,
