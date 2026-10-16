@@ -7,7 +7,15 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { DevicePlatform, TelemetrySnapshot } from '../lib/enterprise/contracts';
-import { analyzeEnterpriseTelemetry } from '../lib/enterprise/findings';
+import {
+  analyzeEnterpriseTelemetry,
+  formatCpuUsage,
+  formatMemoryUsage,
+  formatDiskFree,
+  generateSymptomAwareExplanation,
+  explainTelemetryQuestion,
+} from '../lib/enterprise/findings';
+import { getCollectorTerminalSnippet } from '../lib/enterprise/collector-scripts';
 
 describe('E3-01: Zero-Install Prompt Evaluation', () => {
   function evaluatePromptType(prompt: string): 'zero-install-browser' | 'zero-install-permission' | 'device-telemetry' {
@@ -126,5 +134,114 @@ describe('E3-01: Synthetic Telemetry Grounding', () => {
       'Must flag invalid snapshot containing out-of-range CPU reading',
     );
   });
-
 });
+
+describe('UX Redesign & Error Remediation Invariants', () => {
+  it('formatCpuUsage returns "Not sampled" for null or NaN and rounded percentage for valid numbers', () => {
+    assert.strictEqual(formatCpuUsage(null), 'Not sampled');
+    assert.strictEqual(formatCpuUsage(undefined), 'Not sampled');
+    assert.strictEqual(formatCpuUsage(NaN), 'Not sampled');
+    assert.strictEqual(formatCpuUsage(45.7), '46%');
+    assert.strictEqual(formatCpuUsage(0), '0%');
+  });
+
+  it('formatMemoryUsage returns clean percentage and gigabytes without noisy raw floats', () => {
+    assert.strictEqual(formatMemoryUsage(null, 16384), 'Not sampled');
+    assert.strictEqual(formatMemoryUsage(1746.883, 8325.325), '21% (1.7 / 8.1 GB)');
+    assert.strictEqual(formatMemoryUsage(8192, 16384), '50% (8.0 / 16.0 GB)');
+  });
+
+  it('formatDiskFree returns percentage free and rounded gigabytes', () => {
+    assert.strictEqual(formatDiskFree(null, 512), 'Not sampled');
+    assert.strictEqual(formatDiskFree(1019.504, 1081.101), '94% free (1020 / 1081 GB)');
+    assert.strictEqual(formatDiskFree(18, 512), '4% free (18 / 512 GB)');
+  });
+
+  it('generateSymptomAwareExplanation bridges reported CPU symptom with alternative detected faults', () => {
+    const dnsFaultSnapshot: TelemetrySnapshot = {
+      schemaVersion: 1,
+      collectionId: '00000000-0000-4000-8000-000000000001',
+      platform: 'windows',
+      osVersion: 'Windows 11',
+      architecture: 'x64',
+      source: 'synthetic',
+      collectorVersion: '1.2.0',
+      collectedAt: new Date().toISOString(),
+      sampleIntervalMs: 5000,
+      cpuPercent: null,
+      memoryTotalMb: 16384,
+      memoryUsedMb: 4000,
+      diskTotalGb: 512,
+      diskFreeGb: 300,
+      dnsResolved: false,
+      gatewayLatencyMs: 150,
+      processes: [],
+      eventExcerpts: [],
+      errors: [],
+    };
+
+    const findings = analyzeEnterpriseTelemetry(dnsFaultSnapshot);
+    const explanation = generateSymptomAwareExplanation('cpu', dnsFaultSnapshot, findings);
+    assert.ok(
+      explanation.includes('high CPU utilization and loud fan noise'),
+      'Must reference the user reported symptom',
+    );
+    assert.ok(
+      explanation.includes('DNS resolution failure'),
+      'Must identify the actual detected anomaly',
+    );
+  });
+
+  it('explainTelemetryQuestion answers follow-up CPU questions directly from snapshot metrics', () => {
+    const snapshot: TelemetrySnapshot = {
+      schemaVersion: 1,
+      collectionId: '00000000-0000-4000-8000-000000000002',
+      platform: 'windows',
+      osVersion: 'Windows 11',
+      architecture: 'x64',
+      source: 'synthetic',
+      collectorVersion: '1.2.0',
+      collectedAt: new Date().toISOString(),
+      sampleIntervalMs: 5000,
+      cpuPercent: 91.2,
+      memoryTotalMb: 16384,
+      memoryUsedMb: 12000,
+      diskTotalGb: 512,
+      diskFreeGb: 100,
+      dnsResolved: true,
+      gatewayLatencyMs: 15,
+      processes: [
+        { pid: 101, name: 'SearchIndexer.exe', cpuPercent: 78.4, memoryMb: 800 },
+      ],
+      eventExcerpts: [],
+      errors: [],
+    };
+
+    const findings = analyzeEnterpriseTelemetry(snapshot);
+    const answer = explainTelemetryQuestion(
+      'the fan noise is really high, do I have high CPU usage?',
+      snapshot,
+      findings,
+      'cpu',
+    );
+
+    assert.ok(answer.includes('91%'), 'Must state current CPU usage');
+    assert.ok(answer.includes('High CPU usage was confirmed'), 'Must confirm elevated CPU condition');
+    assert.ok(answer.includes('SearchIndexer.exe'), 'Must list top process');
+  });
+
+  it('getCollectorTerminalSnippet writes to safe system temp directories on all platforms', () => {
+    const winSnippet = getCollectorTerminalSnippet('windows', 'http://127.0.0.1:8790');
+    assert.ok(winSnippet.includes('$env:TEMP'), 'Windows collector snippet must use $env:TEMP');
+    assert.ok(winSnippet.includes('relay-inspect.ps1'), 'Windows collector snippet must name temp file');
+    assert.ok(winSnippet.includes('Unblock-File'), 'Windows collector snippet must unblock downloaded script');
+    assert.doesNotMatch(winSnippet, /-OutFile inspect\.ps1/, 'Must not use relative inspect.ps1 output');
+
+    const macSnippet = getCollectorTerminalSnippet('macos', 'http://127.0.0.1:8790');
+    assert.ok(macSnippet.includes('/tmp/relay-inspect.sh'), 'macOS collector snippet must use /tmp');
+
+    const ubuSnippet = getCollectorTerminalSnippet('ubuntu', 'http://127.0.0.1:8790');
+    assert.ok(ubuSnippet.includes('/tmp/relay-inspect.sh'), 'Ubuntu collector snippet must use /tmp');
+  });
+});
+

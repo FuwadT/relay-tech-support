@@ -147,7 +147,17 @@ export default function TechSupportApp({
   const [dataAsOf, setDataAsOf] = useState<string | null>(null);
   const [queueReady, setQueueReady] = useState(false);
   const [queueAsOf, setQueueAsOf] = useState<string | null>(null);
+  const [detectedPlatformLabel, setDetectedPlatformLabel] = useState('Windows 11');
   const retryTrigger = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (typeof navigator !== 'undefined') {
+      const ua = navigator.userAgent.toLowerCase();
+      if (ua.includes('win')) setDetectedPlatformLabel('Windows 11');
+      else if (ua.includes('mac')) setDetectedPlatformLabel('macOS');
+      else if (ua.includes('linux') || ua.includes('ubuntu')) setDetectedPlatformLabel('Ubuntu Linux');
+    }
+  }, []);
 
   useEffect(() => {
     if (view === 'new' && submission && !busy) retryTrigger.current?.focus();
@@ -1826,7 +1836,7 @@ export default function TechSupportApp({
         </main>
         <footer className="workspace-footer">
           <span>Relay / Tech support</span>
-          <span>Early access · Windows 11</span>
+          <span>Early access · {detectedPlatformLabel}</span>
         </footer>
       </div>
     </div>

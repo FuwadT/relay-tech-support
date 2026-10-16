@@ -53,7 +53,7 @@ fi
 OS_VERSION=$(sw_vers -productVersion 2>/dev/null || echo "15.0")
 
 # Execute read-only sampling via embedded Python 3 script
-python3 - "$COLLECTION_ID" "$OS_VERSION" "$INCLUDE_NETWORK" << 'PYEOF'
+JSON_OUTPUT=$(python3 - "$COLLECTION_ID" "$OS_VERSION" "$INCLUDE_NETWORK" << 'PYEOF'
 import sys
 import os
 import time
@@ -248,3 +248,13 @@ snapshot = {
 
 print(json.dumps(snapshot, separators=(',', ':')))
 PYEOF
+)
+
+printf '%s\n' "$JSON_OUTPUT"
+
+# Copy to clipboard automatically if pbcopy is available
+if command -v pbcopy >/dev/null 2>&1; then
+  printf '%s' "$JSON_OUTPUT" | pbcopy
+  echo "[Relay] Telemetry automatically copied to your clipboard!" >&2
+fi
+

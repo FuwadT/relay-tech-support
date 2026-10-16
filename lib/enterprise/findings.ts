@@ -65,3 +65,136 @@ export function analyzeEnterpriseTelemetry(snapshot: TelemetrySnapshot): Evidenc
   known, null, 'info');
   return findings;
 }
+
+/** Safe CPU usage formatter avoiding bare '%' when unsampled or NaN. */
+export function formatCpuUsage(cpuPercent?: number | null): string {
+  if (typeof cpuPercent !== 'number' || Number.isNaN(cpuPercent)) {
+    return 'Not sampled';
+  }
+  return `${Math.round(cpuPercent)}%`;
+}
+
+/** Safe memory formatter with clean percentages and rounded GB values. */
+export function formatMemoryUsage(usedMb?: number | null, totalMb?: number | null): string {
+  if (typeof usedMb !== 'number' || typeof totalMb !== 'number' || totalMb <= 0) {
+    return 'Not sampled';
+  }
+  const pct = Math.round((usedMb / totalMb) * 100);
+  const usedGb = (usedMb / 1024).toFixed(1);
+  const totalGb = (totalMb / 1024).toFixed(1);
+  return `${pct}% (${usedGb} / ${totalGb} GB)`;
+}
+
+/** Safe disk space formatter with rounded GB and percentage free. */
+export function formatDiskFree(freeGb?: number | null, totalGb?: number | null): string {
+  if (typeof freeGb !== 'number' || typeof totalGb !== 'number' || totalGb <= 0) {
+    return 'Not sampled';
+  }
+  const freePct = Math.round((freeGb / totalGb) * 100);
+  return `${freePct}% free (${Math.round(freeGb)} / ${Math.round(totalGb)} GB)`;
+}
+
+/**
+ * Symptom-aware diagnostic explanation reconciling user-reported symptoms
+ * with collected telemetry findings (Fix 5).
+ */
+export function generateSymptomAwareExplanation(
+  symptomCategory: string,
+  snapshot: TelemetrySnapshot,
+  findings: EvidenceFinding[],
+): string {
+  const isCpuSymptom = symptomCategory.toLowerCase().includes('cpu') ||
+    symptomCategory.toLowerCase().includes('fan') ||
+    symptomCategory.toLowerCase().includes('perf');
+
+  const hasCpuSpike = typeof snapshot.cpuPercent === 'number' && snapshot.cpuPercent >= 75;
+  const dnsFailed = snapshot.dnsResolved === false;
+  const diskLow = findings.some((f) => f.id === 'disk-free-low');
+
+  if (isCpuSymptom && !hasCpuSpike) {
+    if (dnsFailed) {
+      return `Note: You reported **high CPU utilization and loud fan noise**, but this telemetry sample did not capture a CPU spike (CPU reading was ${
+        snapshot.cpuPercent === null ? 'not sampled' : `normal at ${Math.round(snapshot.cpuPercent)}%`
+      }). However, it did detect a **DNS resolution failure** (\`catalog-net-flush-dns\`). Would you like to run the **High CPU** check to investigate your fan noise, or fix the DNS issue first?`;
+    }
+    if (diskLow) {
+      return `Note: You reported **high CPU utilization and loud fan noise**, but this telemetry sample showed ${
+        snapshot.cpuPercent === null ? 'CPU was not sampled' : `CPU was normal at ${Math.round(snapshot.cpuPercent)}%`
+      }. It did detect **low disk storage** (${formatDiskFree(snapshot.diskFreeGb, snapshot.diskTotalGb)}). Low disk space can lead to swap thrashing and fan activity.`;
+    }
+  }
+
+  if (findings.length > 0) {
+    const primary = findings[0];
+    return `Analysis complete. Based on ${findings.length} evidence-linked observation(s), the primary factor is **${primary.id}**: ${primary.observation}`;
+  }
+
+  return 'Analysis complete. All collected metrics are within normal operating parameters. Ongoing monitoring is recommended.';
+}
+
+/**
+ * Answers conversational follow-up questions from the active telemetry snapshot (Fix 1).
+ */
+export function explainTelemetryQuestion(
+  question: string,
+  snapshot: TelemetrySnapshot,
+  findings: EvidenceFinding[],
+  symptomCategory: string = 'general',
+): string {
+  const q = question.toLowerCase();
+
+  if (q.includes('cpu') || q.includes('fan') || q.includes('heat') || q.includes('freeze') || q.includes('noise')) {
+    if (typeof snapshot.cpuPercent === 'number') {
+      const topProcs = snapshot.processes.slice(0, 3).map((p) => `${p.name} (${p.cpuPercent ?? 0}%)`).join(', ');
+      return `Your latest telemetry shows CPU usage at **${formatCpuUsage(snapshot.cpuPercent)}** and memory at **${formatMemoryUsage(snapshot.memoryUsedMb, snapshot.memoryTotalMb)}**. ${
+        snapshot.cpuPercent >= 75
+          ? `High CPU usage was confirmed. Top active processes: ${topProcs || 'none recorded'}.`
+          : `CPU usage was not elevated during this measurement. Fan noise may be related to periodic background bursts, GPU workload, or thermal ventilation.`
+      }`;
+    }
+    return `Your last snapshot captured memory (${formatMemoryUsage(snapshot.memoryUsedMb, snapshot.memoryTotalMb)}) and DNS status (${
+      snapshot.dnsResolved === null ? 'Not checked' : snapshot.dnsResolved ? 'Working' : 'Failed'
+    }), but didn't include a live CPU percentage sample. Since your primary symptom is loud fan noise and freezing, let's trigger a High-CPU sample or inspect your top processes.`;
+  }
+
+  if (q.includes('memory') || q.includes('ram')) {
+    const memFormatted = formatMemoryUsage(snapshot.memoryUsedMb, snapshot.memoryTotalMb);
+    const memHigh = findings.some((f) => f.id === 'memory-high');
+    return `Your latest telemetry shows memory usage at **${memFormatted}**. ${
+      memHigh
+        ? 'High memory pressure detected. Applications may experience slowdowns or memory exhaustion.'
+        : 'Memory usage is currently within comfortable operating limits.'
+    }`;
+  }
+
+  if (q.includes('disk') || q.includes('storage') || q.includes('space') || q.includes('drive')) {
+    const diskFormatted = formatDiskFree(snapshot.diskFreeGb, snapshot.diskTotalGb);
+    const diskLow = findings.some((f) => f.id === 'disk-free-low');
+    return `Your device storage partition shows **${diskFormatted}**. ${
+      diskLow ? 'Available storage is low, which can impede system caching and virtual memory.' : 'Storage headroom is sufficient.'
+    }`;
+  }
+
+  if (q.includes('dns') || q.includes('wifi') || q.includes('network') || q.includes('internet') || q.includes('connect')) {
+    return `Your network check shows DNS resolution is **${
+      snapshot.dnsResolved === null ? 'Not sampled' : snapshot.dnsResolved ? 'Operating normally' : 'Failing'
+    }** with gateway latency of **${
+      snapshot.gatewayLatencyMs !== null ? `${snapshot.gatewayLatencyMs} ms` : 'Not sampled'
+    }**.`;
+  }
+
+  // General grounded summary
+  const cpuStr = formatCpuUsage(snapshot.cpuPercent);
+  const memStr = formatMemoryUsage(snapshot.memoryUsedMb, snapshot.memoryTotalMb);
+  const diskStr = formatDiskFree(snapshot.diskFreeGb, snapshot.diskTotalGb);
+  const dnsStr = snapshot.dnsResolved === null ? 'Not sampled' : snapshot.dnsResolved ? 'Healthy' : 'Failing';
+
+  return `Here is your current device telemetry status:
+- **CPU Usage:** ${cpuStr}
+- **Memory Used:** ${memStr}
+- **Disk Free:** ${diskStr}
+- **DNS Resolution:** ${dnsStr}
+
+${findings.length > 0 ? `Identified findings: ${findings.map((f) => f.id).join(', ')}.` : 'No critical thresholds exceeded.'}`;
+}
+

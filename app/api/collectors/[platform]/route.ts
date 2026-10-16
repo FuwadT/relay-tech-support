@@ -13,7 +13,22 @@ export async function GET(request: Request, context: Context) {
     );
   }
 
-  return new Response(script.content, {
+  const url = new URL(request.url);
+  const caseId = url.searchParams.get('caseId');
+  const callbackUrl = url.searchParams.get('callbackUrl');
+
+  let content = script.content;
+  if (callbackUrl || caseId) {
+    if (script.platform === 'windows') {
+      const inject = `$env:RELAY_CASE_ID = "${caseId || ''}"\n$env:RELAY_CALLBACK_URL = "${callbackUrl || ''}"\n`;
+      content = inject + content;
+    } else {
+      const inject = `export RELAY_CASE_ID="${caseId || ''}"\nexport RELAY_CALLBACK_URL="${callbackUrl || ''}"\n`;
+      content = content.replace(/^#!\/usr\/bin\/env bash\n/, `#!/usr/bin/env bash\n${inject}`);
+    }
+  }
+
+  return new Response(content, {
     status: 200,
     headers: {
       'Content-Type': script.contentType,

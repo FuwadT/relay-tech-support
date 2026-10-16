@@ -142,5 +142,21 @@ function Invoke-WindowsSnapshot {
 # Dot-sourcing exposes pure sampling functions to fixture tests without reading
 # the host. Direct -File invocation emits exactly one locally reviewable JSON.
 if ($MyInvocation.InvocationName -ne '.') {
-    Invoke-WindowsSnapshot | ConvertTo-Json -Depth 8 -Compress
+    $jsonOutput = Invoke-WindowsSnapshot | ConvertTo-Json -Depth 8 -Compress
+    [Console]::WriteLine($jsonOutput)
+
+    # Automatically copy to clipboard so user doesn't have to highlight text
+    try {
+        $jsonOutput | Set-Clipboard -ErrorAction SilentlyContinue
+        Write-Host "`n[Relay] Telemetry copied to clipboard automatically!" -ForegroundColor Green
+    } catch {}
+
+    # If a callback URL is provided, POST directly to the active browser session
+    if ($env:RELAY_CALLBACK_URL) {
+        try {
+            Invoke-RestMethod -Uri $env:RELAY_CALLBACK_URL -Method Post -Body $jsonOutput -ContentType "application/json" -ErrorAction SilentlyContinue
+            Write-Host "[Relay] Telemetry uploaded directly to your active browser session!" -ForegroundColor Green
+        } catch {}
+    }
 }
+

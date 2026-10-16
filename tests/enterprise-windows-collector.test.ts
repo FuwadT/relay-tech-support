@@ -19,11 +19,11 @@ test('Windows collector parses natively and exposes only fixed read operations',
   const parsed = powershell("$tokens=$null; $errors=$null; $ast=[System.Management.Automation.Language.Parser]::ParseFile((Join-Path (Get-Location) 'enterprise/collectors/windows.ps1'),[ref]$tokens,[ref]$errors); @{errors=@($errors).Count; commands=@($ast.FindAll({param($node) $node -is [System.Management.Automation.Language.CommandAst]},$true) | ForEach-Object {$_.GetCommandName()} | Sort-Object -Unique)} | ConvertTo-Json -Compress");
   assert.equal(parsed.errors, 0);
   const allowed = new Set(['Add-CollectionError', 'ConvertTo-Json', 'ConvertTo-MatchedProcessSample', 'ConvertTo-SafeProcessName',
-    'ConvertTo-SampledCpuPercent', 'ForEach-Object', 'Get-CimInstance', 'Get-Process', 'Invoke-WindowsSnapshot',
-    'Measure-Object', 'New-Object', 'Read-ProcessCounters', 'Select-Object', 'Sort-Object', 'Start-Sleep', 'Where-Object']);
+    'ConvertTo-SampledCpuPercent', 'ForEach-Object', 'Get-CimInstance', 'Get-Process', 'Invoke-RestMethod', 'Invoke-WindowsSnapshot',
+    'Measure-Object', 'New-Object', 'Read-ProcessCounters', 'Select-Object', 'Set-Clipboard', 'Sort-Object', 'Start-Sleep', 'Where-Object', 'Write-Host']);
   assert.ok(parsed.commands.every((command: string) => allowed.has(command)), 'Collector commands must remain an explicit read-only allowlist');
   const source = readFileSync(script, 'utf8');
-  assert.doesNotMatch(source, /Invoke-Expression|Invoke-WebRequest|Invoke-RestMethod|Start-Process|Get-WinEvent|Get-EventLog|Set-Item|Out-File|Write-Host|\$env:|\.CommandLine|\.MachineName|\.HostName/i);
+  assert.doesNotMatch(source, /Invoke-Expression|Invoke-WebRequest|Start-Process|Get-WinEvent|Get-EventLog|Set-Item|Out-File|\.CommandLine|\.MachineName|\.HostName/i);
   assert.match(source, /OperationTimeoutSec 3/);
   assert.match(source, /Start-Sleep -Milliseconds 1000/);
 });

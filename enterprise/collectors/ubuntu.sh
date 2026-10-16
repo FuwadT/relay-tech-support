@@ -58,7 +58,7 @@ if [[ "$OS_ID" != "ubuntu" ]] || [[ "$ARCH" != "x86_64" ]]; then
 fi
 
 # Execute read-only sampling via embedded Python 3 script
-python3 - "$COLLECTION_ID" "$OS_VERSION" "$INCLUDE_NETWORK" << 'PYEOF'
+JSON_OUTPUT=$(python3 - "$COLLECTION_ID" "$OS_VERSION" "$INCLUDE_NETWORK" << 'PYEOF'
 import sys
 import os
 import time
@@ -225,3 +225,19 @@ snapshot = {
 
 print(json.dumps(snapshot, separators=(',', ':')))
 PYEOF
+)
+
+printf '%s\n' "$JSON_OUTPUT"
+
+# Copy to clipboard automatically if pbcopy / xclip / wl-copy is available
+if command -v pbcopy >/dev/null 2>&1; then
+  printf '%s' "$JSON_OUTPUT" | pbcopy
+  echo "[Relay] Telemetry automatically copied to your clipboard!" >&2
+elif command -v wl-copy >/dev/null 2>&1; then
+  printf '%s' "$JSON_OUTPUT" | wl-copy
+  echo "[Relay] Telemetry automatically copied to your clipboard!" >&2
+elif command -v xclip >/dev/null 2>&1; then
+  printf '%s' "$JSON_OUTPUT" | xclip -selection clipboard
+  echo "[Relay] Telemetry automatically copied to your clipboard!" >&2
+fi
+
