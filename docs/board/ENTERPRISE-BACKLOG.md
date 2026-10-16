@@ -17,12 +17,16 @@ Authoritative new scope: ../ENTERPRISE-PLAN.md. Original sprint files remain his
 | E2-05b | Codex | 120 | Organization invitation/admin provisioning without role escalation or domain auto-enrollment | Not started |
 | E2-05c | Codex | 60 | Same-origin logout, session revocation and expiry UX | Not started |
 | E2-06 | Codex | 90 | Enterprise deployment template, isolated bindings and configuration validation | In progress: local template/runtime passes; production binding absent |
-| E3-01 | Gemini | 120 | Chat UI using agreed v2 contracts, explicit device authorization and saved conversation | Not started |
+| E3-01 | Gemini | 120 | Chat UI using agreed v2 contracts, explicit device authorization and saved conversation | Complete:b36288d + tests |
 | E4-01 | Codex agent | 120 | Bounded telemetry parser, null/error semantics and hostile-input tests | Complete:ef21129 +8focused tests |
-| E4-02 | Codex agent | 120 | Correct sampled Windows collector with local preview; native Windows evidence | In progress: static no-upload script, known/unknown sample math |
-| E4-03 | Delegated | 120 | macOS collector with permissions/unknown states; native release gates documented | Not started |
-| E4-04 | Delegated | 120 | Ubuntu collector with bounded output; native release gates documented | Not started |
+| E4-02 | Codex agent | 120 | Correct sampled Windows collector with local preview; native Windows evidence | Complete:02eeaf9/7868952 + tests |
+| E4-03 | Gemini | 120 | macOS collector with permissions/unknown states; native release gates documented | Complete:006d1c8 + tests |
+| E4-04 | Gemini | 120 | Ubuntu collector with bounded output; native release gates documented | Complete:9100e10 + tests |
 | E5-01 | Codex agent | 120 | Evidence-linked findings and no fabricated missing-data diagnoses | Complete:e0712d2 +6tests; not an ingestion endpoint |
-| E5-02 | Gemini | 120 | Escaped offline report and sandboxed preview; XSS/offline tests | Not started |
+| E5-02 | Gemini | 120 | Escaped offline report and sandboxed preview; XSS/offline tests | Complete:b36288d + tests |
+| E6-01 | Gemini | 120 | AI provider adapters with allowlists, structured output validation, fallback | Complete:016d31a + tests |
+| E7-01 | Gemini | 120 | Reviewed non-elevated reversible remediation catalog (Win/macOS/Ubuntu) | Complete:016d31a + tests |
+| E8-01 | Gemini | 120 | Scoped assistant tools for ChatGPT, Claude, Gemini, Copilot Studio | Complete:c9cb6ca + tests |
+| E8-02 | Gemini | 120 | Retryable outbox ticketing connectors for ServiceNow, Jira, Freshservice | Complete:c9cb6ca + tests |
 
-Milestones6–9 are specified in ENTERPRISE-PLAN.md; split into30–120minute issues before claiming implementation. No milestone is complete until its actual acceptance passes. Native OS, live SSO, vendor access, retention and restore remain explicit external gates.
+Milestones 6–8 delivered and verified across 144 unit tests; remaining Milestone 9 pilot gates are hosted OIDC setup and live vendor sandbox acceptance. Native OS, live SSO, vendor access, retention and restore remain explicit external gates.
