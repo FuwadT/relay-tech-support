@@ -1,172 +1,123 @@
-/**
- * Tests for Reviewed Remediation Catalog (Task E7-01).
- * Verifies that all catalog actions are non-elevated, reversible, and explicitly
- * exclude force-kill, destructive cleanup, elevation, and registry modifications.
- */
-
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { DevicePlatform, RemediationProposal } from '../lib/enterprise/contracts';
+import { spawnSync } from 'node:child_process';
 import {
-  APPROVED_CATALOG_ACTIONS,
-  createRemediationProposal,
-  getCatalogAction,
-  listCatalogActions,
-  validateRemediationProposal,
+  createRemediationProposal, getCatalogAction, getUnavailableCatalogReason,
+  listCatalogActions, validateRemediationProposal,
 } from '../lib/enterprise/remediation-catalog';
 
-describe('E7-01: Remediation Catalog Action Safety Guarantees', () => {
-  it('every catalog action specifies requiresElevation: false', () => {
-    for (const action of APPROVED_CATALOG_ACTIONS) {
-      assert.strictEqual(
-        action.requiresElevation,
-        false,
-        `Action ${action.id} must have requiresElevation === false`,
-      );
+const actionId = 'win-proc-graceful-request';
+const target = { pid: 1234, processName: 'notepad', processStartTime: '2026-10-16T01:02:03.004Z' };
+const evidence = ['/processes/0/pid'];
+const proposal = () => createRemediationProposal(actionId, 'windows', evidence, target)!;
+const action = getCatalogAction(actionId, 'windows')!;
+
+describe('remediation boundary groundwork (renders only; no native execution)', () => {
+  it('removes irreversible cleanup and disables unverified DNS and Unix signal actions', () => {
+    const disabled = [
+      ['win-disk-clean-user-temp', 'windows'], ['win-net-flush-dns-cache', 'windows'],
+      ['mac-net-flush-dns', 'macos'], ['mac-proc-graceful-term', 'macos'],
+      ['ubuntu-net-flush-resolve-cache', 'ubuntu'], ['ubuntu-proc-graceful-term', 'ubuntu'],
+    ] as const;
+    for (const [id, platform] of disabled) {
+      assert.equal(getCatalogAction(id, platform), null);
+      assert.equal(createRemediationProposal(id, platform, evidence, target), null);
+      assert.equal(validateRemediationProposal({ ...proposal(), catalogActionId: id, platform }).ok, false);
+      assert.ok(getUnavailableCatalogReason(id, platform));
+    }
+    assert.deepEqual(listCatalogActions('macos'), []);
+    assert.deepEqual(listCatalogActions('ubuntu'), []);
+  });
+
+  it('requires explicit PID, name, start identity and evidence before proposal creation', () => {
+    const partials: Array<Record<string, string | number | boolean>> = [{}, { pid: 1234 }, { pid: 1234, processName: 'notepad' }];
+    for (const partial of partials) {
+      assert.equal(createRemediationProposal(actionId, 'windows', evidence, partial), null);
+      assert.throws(() => action.renderScript(partial));
+      assert.equal(validateRemediationProposal({ ...proposal(), parameters: partial }).ok, false);
+    }
+    assert.equal(createRemediationProposal(actionId, 'windows', [], target), null);
+    assert.equal(validateRemediationProposal({ ...proposal(), evidenceIds: [] }).ok, false);
+  });
+
+  it('rejects zero, negative, fractional, nonfinite, oversized and string PIDs at all boundaries', () => {
+    for (const pid of [0, -1, -100, 1.5, NaN, Infinity, -Infinity, 2147483648, '1234']) {
+      const parameters = { ...target, pid };
+      assert.equal(createRemediationProposal(actionId, 'windows', evidence, parameters), null);
+      assert.throws(() => action.renderScript(parameters));
+      assert.equal(validateRemediationProposal({ ...proposal(), parameters }).ok, false);
     }
   });
 
-  it('no catalog action contains force-kill (kill -9 / Stop-Process -Force)', () => {
-    for (const action of APPROVED_CATALOG_ACTIONS) {
-      const script = action.renderScript({ pid: 1234, daysOld: 14 });
-      assert.ok(
-        !script.includes('kill -9'),
-        `Action ${action.id} script must not contain "kill -9"`,
-      );
-      assert.ok(
-        !script.includes('-Force') || action.id === 'win-disk-clean-user-temp',
-        `Action ${action.id} must not use -Force for process termination`,
-      );
-      assert.ok(
-        !script.includes('SIGKILL'),
-        `Action ${action.id} must not use SIGKILL`,
-      );
+  it('rejects executable values, extra parameters, inherited values and accessors', () => {
+    let getterRead = false;
+    const parametersList = [
+      { ...target, processName: "notepad'; Write-Output forged; '" },
+      { ...target, processName: '$(Write-Output forged)' },
+      { ...target, processName: 'note\npad' },
+      { ...target, processName: '*notepad*' },
+      { ...target, processName: ' notepad ' },
+      { ...target, arbitraryCommand: 'echo forged' },
+      { ...target, processStartTime: '2026-02-31T00:00:00.000Z' },
+      { ...target, processStartTime: '2026-10-16T01:02:03Z' },
+      Object.create(target),
+      Object.defineProperty({ ...target }, 'pid', { enumerable: true, get() { getterRead = true; return 1234; } }),
+    ];
+    for (const parameters of parametersList) {
+      assert.equal(createRemediationProposal(actionId, 'windows', evidence, parameters), null);
+      assert.throws(() => action.renderScript(parameters));
+      assert.equal(validateRemediationProposal({ ...proposal(), parameters }).ok, false);
     }
+    assert.equal(getterRead, false);
   });
 
-  it('no catalog action contains elevation commands (sudo, gsudo, runas, Start-Process -Verb RunAs)', () => {
-    for (const action of APPROVED_CATALOG_ACTIONS) {
-      const script = action.renderScript({ pid: 1234 });
-      assert.ok(!script.includes('sudo '), `Action ${action.id} must not contain sudo`);
-      assert.ok(!script.includes('RunAs'), `Action ${action.id} must not request RunAs elevation`);
-      assert.ok(!script.includes('gsudo'), `Action ${action.id} must not contain gsudo`);
-    }
+  it('rejects changed versions, platforms, elevation, disclosure text and unknown fields', () => {
+    for (const change of [
+      { catalogVersion: '1.0.0' }, { platform: 'ubuntu' }, { requiresElevation: true },
+      { consequences: ['Guaranteed repair without risk.'] }, { rollbackInstructions: [] },
+      { followUpCheckIds: ['run_arbitrary_shell'] }, { extra: true }, { id: 'not-a-proposal' },
+    ]) assert.equal(validateRemediationProposal({ ...proposal(), ...change }).ok, false);
+    assert.equal(validateRemediationProposal({ ...proposal(), evidenceIds: Array(1) }).ok, false);
   });
 
-  it('no catalog action modifies system registry (Set-ItemProperty, New-ItemProperty, reg add)', () => {
-    for (const action of APPROVED_CATALOG_ACTIONS) {
-      const script = action.renderScript({ pid: 1234 });
-      assert.ok(!script.includes('Set-ItemProperty'), `Action ${action.id} must not edit registry`);
-      assert.ok(!script.includes('New-ItemProperty'), `Action ${action.id} must not edit registry`);
-      assert.ok(!script.includes('reg add'), `Action ${action.id} must not edit registry`);
-      assert.ok(!script.includes('HKLM:'), `Action ${action.id} must not touch HKLM`);
-    }
+  it('copies validated target/evidence so caller mutation cannot change a proposal', () => {
+    const input = { ...target };
+    const refs = [...evidence];
+    const created = createRemediationProposal(actionId, 'windows', refs, input)!;
+    input.pid = 999; refs[0] = 'changed';
+    assert.deepEqual(created.parameters, target);
+    assert.deepEqual(created.evidenceIds, evidence);
+    const validated = validateRemediationProposal(created);
+    assert.equal(validated.ok, true);
+    if (!validated.ok) return;
+    created.parameters.pid = 555; created.evidenceIds[0] = 'changed-again';
+    assert.deepEqual(validated.value.parameters, target);
+    assert.deepEqual(validated.value.evidenceIds, evidence);
   });
 
-  it('every catalog action provides prerequisites, consequences, and rollback instructions', () => {
-    for (const action of APPROVED_CATALOG_ACTIONS) {
-      assert.ok(action.prerequisites.length > 0, `Action ${action.id} must list prerequisites`);
-      assert.ok(action.consequences.length > 0, `Action ${action.id} must list consequences`);
-      assert.ok(
-        action.rollbackInstructions.length > 0,
-        `Action ${action.id} must list rollback instructions`,
-      );
-      assert.ok(
-        action.followUpCheckIds.length > 0,
-        `Action ${action.id} must specify follow-up check IDs`,
-      );
-    }
-  });
-});
-
-describe('E7-01: Catalog Proposal Creation and Validation', () => {
-  it('createRemediationProposal creates valid proposal matching platform and catalog', () => {
-    const proposal = createRemediationProposal(
-      'win-net-flush-dns-cache',
-      'windows',
-      ['ev-101'],
-      {},
-    );
-
-    assert.ok(proposal !== null);
-    assert.strictEqual(proposal.catalogActionId, 'win-net-flush-dns-cache');
-    assert.strictEqual(proposal.platform, 'windows');
-    assert.strictEqual(proposal.requiresElevation, false);
-    assert.deepStrictEqual(proposal.evidenceIds, ['ev-101']);
-    assert.ok(proposal.consequences.length > 0);
+  it('renders ownership/session/start guards and truthful window-request results', () => {
+    const script = action.renderScript(target);
+    assert.match(script, /GetOwnerSid/);
+    assert.match(script, /WindowsIdentity.*GetCurrent/);
+    assert.match(script, /\$owner\.Sid -cne \$currentSid/);
+    assert.match(script, /\$proc\.SessionId -ne \$currentSession/);
+    assert.match(script, /\$proc\.ProcessName -cne \$expectedName/);
+    assert.equal((script.match(/\$proc\.StartTime/g) ?? []).length, 2);
+    assert.match(script, /\$proc\.MainWindowHandle -eq \[IntPtr\]::Zero/);
+    assert.match(script, /if \(-not \$proc\.CloseMainWindow\(\)\) \{ throw/);
+    assert.ok(script.indexOf('GetOwnerSid') < script.indexOf('.CloseMainWindow()'));
+    assert.match(script, /request sent.*actual outcome and gather follow-up readings/);
+    assert.doesNotMatch(script, /Remove-Item|Stop-Process|killall|kill -|Clear-Dns|resolvectl|Set-ItemProperty|Start-Process|-Force|SilentlyContinue|\|\| true/);
   });
 
-  it('createRemediationProposal returns null for mismatched platform and action', () => {
-    // Windows action requested on Ubuntu platform
-    const proposal = createRemediationProposal(
-      'win-net-flush-dns-cache',
-      'ubuntu',
-      ['ev-101'],
-    );
-    assert.strictEqual(proposal, null);
-  });
-
-  it('validateRemediationProposal accepts valid proposals', () => {
-    const valid: RemediationProposal = {
-      id: 'prop-valid-001',
-      catalogActionId: 'mac-net-flush-dns',
-      catalogVersion: '1.0.0',
-      platform: 'macos',
-      evidenceIds: ['ev-mac-1'],
-      parameters: {},
-      consequences: ['Refreshes mDNS'],
-      rollbackInstructions: ['No rollback required'],
-      followUpCheckIds: ['dns_resolution_check'],
-      requiresElevation: false,
-    };
-
-    const result = validateRemediationProposal(valid);
-    assert.strictEqual(result.ok, true);
-    if (result.ok) {
-      assert.strictEqual(result.value.catalogActionId, 'mac-net-flush-dns');
-      assert.strictEqual(result.value.requiresElevation, false);
-    }
-  });
-
-  it('validateRemediationProposal rejects proposals requesting elevation (requiresElevation: true)', () => {
-    const elevated = {
-      id: 'prop-elevated-001',
-      catalogActionId: 'win-net-flush-dns-cache',
-      catalogVersion: '1.0.0',
-      platform: 'windows',
-      evidenceIds: ['ev-1'],
-      parameters: {},
-      consequences: [],
-      rollbackInstructions: [],
-      followUpCheckIds: [],
-      requiresElevation: true, // Violation!
-    };
-
-    const result = validateRemediationProposal(elevated);
-    assert.strictEqual(result.ok, false);
-    if (!result.ok) {
-      assert.ok(result.error.includes('Security violation'));
-    }
-  });
-
-  it('validateRemediationProposal rejects unknown or unapproved catalogActionId', () => {
-    const unknownAction = {
-      id: 'prop-unknown-001',
-      catalogActionId: 'arbitrary-shell-execution-script',
-      catalogVersion: '1.0.0',
-      platform: 'windows',
-      evidenceIds: ['ev-1'],
-      parameters: {},
-      consequences: [],
-      rollbackInstructions: [],
-      followUpCheckIds: [],
-      requiresElevation: false,
-    };
-
-    const result = validateRemediationProposal(unknownAction);
-    assert.strictEqual(result.ok, false);
-    if (!result.ok) {
-      assert.ok(result.error.includes('not approved'));
-    }
+  it('parses the rendered script with Windows PowerShell without executing it', { skip: process.platform !== 'win32' }, () => {
+    const parseOnly = '$source = [Console]::In.ReadToEnd(); $tokens = $null; $errors = $null; '
+      + '[void][System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$errors); '
+      + 'if ($errors.Count -gt 0) { $errors | ForEach-Object { $_.Message }; exit 1 }; Write-Output "parse-only passed"';
+    const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', parseOnly], {
+      input: action.renderScript(target), encoding: 'utf8', timeout: 10000, windowsHide: true,
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout || result.error?.message);
+    assert.match(result.stdout, /parse-only passed/);
   });
 });

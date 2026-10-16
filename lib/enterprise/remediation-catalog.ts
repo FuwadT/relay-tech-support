@@ -1,372 +1,162 @@
-/**
- * Reviewed Remediation Catalog (Task E7-01).
- *
- * Implements strict constraints per ENTERPRISE-PLAN.md:
- * - Versioned low-risk, reversible catalog actions per OS
- * - Non-elevated only (requiresElevation: false)
- * - Excludes: force-kill (SIGKILL / kill -9), privileged service mutations,
- *   destructive recursive deletes (rm -rf), registry edits, and elevation prompts (sudo / UAC).
- * - Scripts show preconditions, consequences, rollback instructions, and follow-up checks.
- * - An execution report does not independently verify repair or auto-resolve cases.
- */
-
-import type {
-  DevicePlatform,
-  RemediationProposal,
-  ValidationResult,
-} from './contracts';
-
-export const REMEDIATION_CATALOG_VERSION = '1.0.0' as const;
-
+/** Proposal groundwork; source review and rendering do not establish native acceptance. */
+import type { DevicePlatform, RemediationProposal, ValidationResult } from './contracts';
+export const REMEDIATION_CATALOG_VERSION = '1.1.0' as const;
 export interface CatalogActionDefinition {
-  id: string;
-  version: string;
-  platform: DevicePlatform;
-  title: string;
-  description: string;
-  prerequisites: string[];
-  consequences: string[];
-  rollbackInstructions: string[];
-  followUpCheckIds: string[];
-  requiresElevation: false;
-  allowedParamKeys: readonly string[];
+  id: string; version: string; platform: DevicePlatform; title: string; description: string;
+  prerequisites: string[]; consequences: string[]; rollbackInstructions: string[];
+  followUpCheckIds: string[]; requiresElevation: false; allowedParamKeys: readonly string[];
   renderScript: (params: Record<string, string | number | boolean>) => string;
 }
-
-/**
- * Approved Catalog Actions.
- * All scripts are strictly non-elevated and non-destructive.
- */
-export const APPROVED_CATALOG_ACTIONS: readonly CatalogActionDefinition[] = [
-  // ─── Windows 11 Actions ──────────────────────────────────────────────────
-  {
-    id: 'win-net-flush-dns-cache',
-    version: REMEDIATION_CATALOG_VERSION,
-    platform: 'windows',
-    title: 'Flush Local DNS Client Cache',
-    description: 'Clears the local Windows DNS resolver cache to resolve stale or incorrect hostname mappings.',
-    prerequisites: [
-      'Active network interface present',
-      'No active file downloads relying on pending hostnames',
-    ],
-    consequences: [
-      'Local cached DNS records are cleared immediately.',
-      'Subsequent network requests will perform a fresh recursive DNS query.',
-      'Active established TCP connections remain completely unaffected.',
-    ],
-    rollbackInstructions: [
-      'No rollback required. Hostnames are re-cached dynamically upon subsequent resolution requests.',
-    ],
-    followUpCheckIds: ['dns_resolution_check', 'gateway_latency_check'],
-    requiresElevation: false,
-    allowedParamKeys: [],
-    renderScript: () => `# Relay Remediation: Flush Local DNS Cache
-# Environment: Non-elevated user execution
-# Consequence: Clears local cached DNS entries; does not alter system configuration.
-
-Clear-DnsClientCache
-Write-Host "DNS client cache successfully flushed." -ForegroundColor Green
-`,
-  },
-  {
-    id: 'win-disk-clean-user-temp',
-    version: REMEDIATION_CATALOG_VERSION,
-    platform: 'windows',
-    title: 'Clean Stale User Temporary Files',
-    description: 'Removes temporary files older than 7 days from the user temporary directory (%TEMP%).',
-    prerequisites: [
-      'Close open document editors or installers that may be actively writing temporary files',
-    ],
-    consequences: [
-      'Deletes unpinned temporary files older than 7 days from user-specific $env:TEMP.',
-      'Does NOT delete system temporary files, registry entries, or application data.',
-    ],
-    rollbackInstructions: [
-      'Temporary files cannot be restored from the recycle bin. Ensure work was saved before executing.',
-    ],
-    followUpCheckIds: ['disk_free_gb_check'],
-    requiresElevation: false,
-    allowedParamKeys: ['daysOld'],
-    renderScript: (params) => {
-      const days = typeof params.daysOld === 'number' && params.daysOld >= 7 ? Math.floor(params.daysOld) : 7;
-      return `# Relay Remediation: Clean Stale User Temp Files
-# Target: User temporary folder only ($env:TEMP)
-# Threshold: Files older than ${days} days
-
-$cutoff = (Get-Date).AddDays(-${days})
-Get-ChildItem -Path $env:TEMP -Recurse -File -ErrorAction SilentlyContinue |
-    Where-Object { $_.LastWriteTime -lt $cutoff } |
-    Remove-Item -Force -ErrorAction SilentlyContinue
-
-Write-Host "Stale user temporary files cleaned." -ForegroundColor Green
-`;
-    },
-  },
-  {
-    id: 'win-proc-graceful-request',
-    version: REMEDIATION_CATALOG_VERSION,
-    platform: 'windows',
-    title: 'Request Graceful Process Close',
-    description: 'Sends a standard close notification to a non-responsive user-owned application.',
-    prerequisites: [
-      'Confirm the target process PID belongs to your own user account',
-      'Save work in any other open windows of the application',
-    ],
-    consequences: [
-      'Sends a graceful WM_CLOSE request to the process window.',
-      'Does NOT use -Force or terminate kernel/system threads.',
-    ],
-    rollbackInstructions: [
-      'Re-launch the application from your Start Menu or taskbar.',
-    ],
-    followUpCheckIds: ['cpu_usage_check', 'memory_usage_check'],
-    requiresElevation: false,
-    allowedParamKeys: ['pid', 'processName'],
-    renderScript: (params) => {
-      const pid = typeof params.pid === 'number' ? Math.floor(params.pid) : 0;
-      return `# Relay Remediation: Graceful Process Termination Request
-# Target PID: ${pid} (Non-elevated, non-forced)
-
-$proc = Get-Process -Id ${pid} -ErrorAction SilentlyContinue
-if ($proc -and $proc.SessionId -eq (Get-Process -Id $PID).SessionId) {
-    # Non-forced graceful close request
-    $proc.CloseMainWindow() | Out-Null
-    Write-Host "Sent graceful close request to process PID ${pid}." -ForegroundColor Green
-} else {
-    Write-Host "Process not found or belongs to another session; skipped." -ForegroundColor Yellow
+interface CloseTarget { pid: number; processName: string; processStartTime: string }
+const targetKeys = ['pid', 'processName', 'processStartTime'];
+const proposalKeys = ['id', 'catalogActionId', 'catalogVersion', 'platform', 'evidenceIds',
+  'parameters', 'consequences', 'rollbackInstructions', 'followUpCheckIds', 'requiresElevation'];
+function dataRecord(input: unknown): input is Record<string, unknown> {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) return false;
+  const prototype = Object.getPrototypeOf(input);
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  return Reflect.ownKeys(input).every(key => typeof key === 'string'
+    && Object.prototype.hasOwnProperty.call(Object.getOwnPropertyDescriptor(input, key), 'value'));
 }
+function closeTarget(input: unknown): CloseTarget | null {
+  if (!dataRecord(input) || Object.keys(input).length !== targetKeys.length
+    || Object.keys(input).some(key => !targetKeys.includes(key))) return null;
+  const { pid, processName, processStartTime } = input;
+  if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid < 1 || pid > 2147483647) return null;
+  // Single-quoted PowerShell literals: no quotes, substitutions, controls, wildcards or paths.
+  if (typeof processName !== 'string' || !/^[A-Za-z0-9_.() -]{1,128}$/.test(processName)
+    || !processName.trim() || processName !== processName.trim()) return null;
+  if (typeof processStartTime !== 'string'
+    || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(processStartTime)) return null;
+  const time = Date.parse(processStartTime);
+  if (!Number.isFinite(time) || new Date(time).toISOString() !== processStartTime) return null;
+  return { pid, processName, processStartTime };
+}
+function boundedStrings(input: unknown, min = 0): input is string[] {
+  if (!Array.isArray(input) || input.length < min || input.length > 32) return false;
+  for (let i = 0; i < input.length; i += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(input, String(i));
+    if (!descriptor || !('value' in descriptor) || typeof descriptor.value !== 'string'
+      || !descriptor.value.trim() || descriptor.value.length > 512
+      || /[\u0000-\u001f\u007f]/.test(descriptor.value)) return false;
+  }
+  return true;
+}
+const unavailable = [
+  { id: 'win-disk-clean-user-temp', platform: 'windows', reason: 'Removed: irreversible file deletion is outside the approved reversible remediation scope.' },
+  { id: 'win-net-flush-dns-cache', platform: 'windows', reason: 'Unavailable: non-elevated permissions and native failure handling have not been verified.' },
+  { id: 'mac-net-flush-dns', platform: 'macos', reason: 'Unavailable: signalling a system DNS service is outside the approved non-elevated action scope.' },
+  { id: 'ubuntu-net-flush-resolve-cache', platform: 'ubuntu', reason: 'Unavailable: system resolver mutation can require privileged authorization; no verified user-only action exists.' },
+  { id: 'mac-proc-graceful-term', platform: 'macos', reason: 'Unavailable: SIGTERM does not guarantee preservation of unsaved work; target identity, ownership and reversibility are not verified.' },
+  { id: 'ubuntu-proc-graceful-term', platform: 'ubuntu', reason: 'Unavailable: SIGTERM does not guarantee preservation of unsaved work; target identity, ownership and reversibility are not verified.' },
+] as const;
+export function getUnavailableCatalogReason(id: string, platform: DevicePlatform): string | null {
+  return unavailable.find(action => action.id === id && action.platform === platform)?.reason ?? null;
+}
+/** Source-reviewed groundwork only. Native release acceptance remains separate. */
+export const APPROVED_CATALOG_ACTIONS: readonly CatalogActionDefinition[] = [{
+  id: 'win-proc-graceful-request', version: REMEDIATION_CATALOG_VERSION, platform: 'windows',
+  title: 'Request an application window to close',
+  description: 'After explicit target review, requests WM_CLOSE for a current-user application window. Native acceptance remains pending.',
+  prerequisites: [
+    'Save your work and confirm this exact application may be closed.',
+    'Obtain fresh PID, exact ProcessName, and UTC StartTime to millisecond precision from the selected process; never infer them from a name alone.',
+    'The application must belong to your Windows user and interactive session and have an open main window.',
+  ],
+  consequences: [
+    'Requests the selected main window to close; the application can refuse or display a save prompt.',
+    'Does not force termination. A request is not proof of closure or repair.',
+    'An application may still lose unsaved work if it handles window-close requests incorrectly.',
+  ],
+  rollbackInstructions: [
+    'Cancel any application save/close prompt if you do not want to continue.',
+    'Reopen the application after a completed close; reopening cannot recover unsaved work.',
+  ],
+  followUpCheckIds: ['cpu_usage_check', 'memory_usage_check'],
+  requiresElevation: false, allowedParamKeys: targetKeys,
+  renderScript: params => {
+    const target = closeTarget(params);
+    if (!target) throw new Error('A valid PID, exact processName and processStartTime are required; no script was rendered.');
+    return `# Relay: request window close after explicit target review.
+# Native acceptance is pending. This script does not verify a repair.
+[CmdletBinding()]
+param()
+$ErrorActionPreference = 'Stop'
+$targetPid = ${target.pid}
+$expectedName = '${target.processName}'
+$expectedStartTime = '${target.processStartTime}'
+
+if ($targetPid -eq $PID) { throw 'Refusing to close the process running this script.' }
+$proc = Get-Process -Id $targetPid -ErrorAction Stop
+$currentSession = (Get-Process -Id $PID -ErrorAction Stop).SessionId
+if ($proc.SessionId -ne $currentSession -or $proc.ProcessName -cne $expectedName -or
+    $proc.StartTime.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ') -cne $expectedStartTime) {
+    throw 'The selected process identity or session changed. No close request was sent.'
+}
+$record = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $targetPid" -OperationTimeoutSec 3 -ErrorAction Stop
+if ($null -eq $record) { throw 'The selected process is no longer available.' }
+$owner = Invoke-CimMethod -InputObject $record -MethodName GetOwnerSid -OperationTimeoutSec 3 -ErrorAction Stop
+$currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+if ($owner.ReturnValue -ne 0 -or [string]::IsNullOrEmpty($currentSid) -or $owner.Sid -cne $currentSid) {
+    throw 'Unable to verify current-user ownership. No close request was sent.'
+}
+# Recheck the held process immediately before requesting its window to close.
+$proc.Refresh()
+if ($proc.HasExited -or $proc.Id -ne $targetPid -or $proc.SessionId -ne $currentSession -or
+    $proc.ProcessName -cne $expectedName -or
+    $proc.StartTime.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ') -cne $expectedStartTime -or
+    $proc.MainWindowHandle -eq [IntPtr]::Zero) {
+    throw 'The target changed or has no application window. No close request was sent.'
+}
+if (-not $proc.CloseMainWindow()) { throw 'The application did not accept a close request.' }
+Write-Host 'Window-close request sent. Check the application for a save prompt; report the actual outcome and gather follow-up readings.'
 `;
-    },
   },
-
-  // ─── macOS Actions (Apple Silicon) ────────────────────────────────────────
-  {
-    id: 'mac-net-flush-dns',
-    version: REMEDIATION_CATALOG_VERSION,
-    platform: 'macos',
-    title: 'Refresh Local mDNS Resolver Cache',
-    description: 'Refreshes local multicast DNS cache without modifying system networking configurations.',
-    prerequisites: [
-      'No active file transfers in progress',
-    ],
-    consequences: [
-      'Notifies mDNSResponder to invalidate local cache entries.',
-      'Active network socket connections remain open and uninterrupted.',
-    ],
-    rollbackInstructions: [
-      'No rollback required. Hostnames are re-resolved on subsequent outbound connections.',
-    ],
-    followUpCheckIds: ['dns_resolution_check'],
-    requiresElevation: false,
-    allowedParamKeys: [],
-    renderScript: () => `#!/usr/bin/env zsh
-# Relay Remediation: Refresh mDNS Cache (macOS)
-# Strictly non-elevated user execution
-
-killall -HUP mDNSResponder 2>/dev/null || true
-echo "DNS responder notification sent."
-`,
-  },
-  {
-    id: 'mac-proc-graceful-term',
-    version: REMEDIATION_CATALOG_VERSION,
-    platform: 'macos',
-    title: 'Send Graceful Termination Signal (SIGTERM)',
-    description: 'Sends a standard SIGTERM (signal 15) to request that a user application exit gracefully.',
-    prerequisites: [
-      'Ensure the process PID belongs to your own user session',
-    ],
-    consequences: [
-      'Requests graceful exit; allows process to save state, flush buffers, and close handles.',
-      'NEVER issues SIGKILL (kill -9) or affects privileged system services.',
-    ],
-    rollbackInstructions: [
-      'Re-open the application from Finder or Dock.',
-    ],
-    followUpCheckIds: ['cpu_usage_check', 'memory_usage_check'],
-    requiresElevation: false,
-    allowedParamKeys: ['pid'],
-    renderScript: (params) => {
-      const pid = typeof params.pid === 'number' ? Math.floor(params.pid) : 0;
-      return `#!/usr/bin/env zsh
-# Relay Remediation: Graceful SIGTERM Request (macOS)
-# Target PID: ${pid}
-
-if kill -0 ${pid} 2>/dev/null; then
-  # Graceful signal 15 (SIGTERM), never -9
-  kill -15 ${pid}
-  echo "Graceful termination signal sent to PID ${pid}."
-else
-  echo "Process ${pid} is not running or not accessible."
-fi
-`;
-    },
-  },
-
-  // ─── Ubuntu Actions (x64) ────────────────────────────────────────────────
-  {
-    id: 'ubuntu-net-flush-resolve-cache',
-    version: REMEDIATION_CATALOG_VERSION,
-    platform: 'ubuntu',
-    title: 'Flush User-Accessible DNS Caches',
-    description: 'Flushes local resolver caches accessible to the standard user session.',
-    prerequisites: [
-      'Network adapter connected',
-    ],
-    consequences: [
-      'Flushes local systemd-resolved cache if permissions allow, or notifies local resolver.',
-      'Preserves all static network interface configurations and DNS server assignments.',
-    ],
-    rollbackInstructions: [
-      'No rollback required. Dynamic name resolution continues automatically.',
-    ],
-    followUpCheckIds: ['dns_resolution_check'],
-    requiresElevation: false,
-    allowedParamKeys: [],
-    renderScript: () => `#!/usr/bin/env bash
-# Relay Remediation: Flush Local DNS Caches (Ubuntu)
-# Strictly non-elevated execution
-
-if command -v resolvectl >/dev/null 2>&1; then
-  resolvectl flush-caches 2>/dev/null || true
-elif command -v systemd-resolve >/dev/null 2>&1; then
-  systemd-resolve --flush-caches 2>/dev/null || true
-fi
-echo "Local resolver cache flush executed."
-`,
-  },
-  {
-    id: 'ubuntu-proc-graceful-term',
-    version: REMEDIATION_CATALOG_VERSION,
-    platform: 'ubuntu',
-    title: 'Send Graceful SIGTERM to User Process',
-    description: 'Sends a standard SIGTERM (15) to request that a user process terminate cleanly.',
-    prerequisites: [
-      'Target PID must belong to the current user ($UID)',
-    ],
-    consequences: [
-      'Sends SIGTERM (15) allowing clean shutdown and file write completion.',
-      'NEVER uses kill -9 or elevated capabilities.',
-    ],
-    rollbackInstructions: [
-      'Re-launch the program from application launcher or terminal.',
-    ],
-    followUpCheckIds: ['cpu_usage_check', 'memory_usage_check'],
-    requiresElevation: false,
-    allowedParamKeys: ['pid'],
-    renderScript: (params) => {
-      const pid = typeof params.pid === 'number' ? Math.floor(params.pid) : 0;
-      return `#!/usr/bin/env bash
-# Relay Remediation: Graceful SIGTERM (Ubuntu)
-# Target PID: ${pid}
-
-if kill -0 ${pid} 2>/dev/null; then
-  # SIGTERM 15 only — never -9
-  kill -15 ${pid}
-  echo "SIGTERM sent to PID ${pid}."
-else
-  echo "Process ${pid} not active in user session."
-fi
-`;
-    },
-  },
-];
-
-/**
- * Returns all catalog action definitions for a given platform.
- */
+}];
 export function listCatalogActions(platform?: DevicePlatform): CatalogActionDefinition[] {
-  if (!platform) return [...APPROVED_CATALOG_ACTIONS];
-  return APPROVED_CATALOG_ACTIONS.filter((a) => a.platform === platform);
+  return APPROVED_CATALOG_ACTIONS.filter(action => !platform || action.platform === platform);
 }
-
-/**
- * Retrieves a specific catalog action definition by ID and platform.
- */
 export function getCatalogAction(id: string, platform: DevicePlatform): CatalogActionDefinition | null {
-  return APPROVED_CATALOG_ACTIONS.find((a) => a.id === id && a.platform === platform) || null;
+  return APPROVED_CATALOG_ACTIONS.find(action => action.id === id && action.platform === platform) ?? null;
 }
-
-/**
- * Constructs a valid RemediationProposal from an approved catalog definition.
- * Models select the action ID and supply validated parameters; they do NOT generate scripts.
- */
 export function createRemediationProposal(
-  actionId: string,
-  platform: DevicePlatform,
-  evidenceIds: string[],
+  actionId: string, platform: DevicePlatform, evidenceIds: string[],
   params: Record<string, string | number | boolean> = {},
 ): RemediationProposal | null {
   const definition = getCatalogAction(actionId, platform);
-  if (!definition) return null;
-
-  // Filter parameters to only allow approved parameter keys
-  const safeParams: Record<string, string | number | boolean> = {};
-  for (const key of definition.allowedParamKeys) {
-    if (key in params) {
-      safeParams[key] = params[key];
-    }
-  }
-
+  const target = closeTarget(params);
+  if (!definition || !target || !boundedStrings(evidenceIds, 1)) return null;
   return {
-    id: `prop-${crypto.randomUUID()}`,
-    catalogActionId: definition.id,
-    catalogVersion: definition.version,
-    platform: definition.platform,
-    evidenceIds: [...evidenceIds],
-    parameters: safeParams,
-    consequences: [...definition.consequences],
-    rollbackInstructions: [...definition.rollbackInstructions],
-    followUpCheckIds: [...definition.followUpCheckIds],
-    requiresElevation: false,
+    id: `prop-${crypto.randomUUID()}`, catalogActionId: definition.id,
+    catalogVersion: definition.version, platform: definition.platform,
+    evidenceIds: [...evidenceIds], parameters: { ...target },
+    consequences: [...definition.consequences], rollbackInstructions: [...definition.rollbackInstructions],
+    followUpCheckIds: [...definition.followUpCheckIds], requiresElevation: false,
   };
 }
-
-/**
- * Validates a proposed remediation object against safety constraints.
- * Rejects any proposal with requiresElevation: true or unapproved action IDs.
- */
 export function validateRemediationProposal(input: unknown): ValidationResult<RemediationProposal> {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) {
-    return { ok: false, error: 'Remediation proposal must be a valid object.' };
+  const fail = (error: string): ValidationResult<RemediationProposal> => ({ ok: false, error });
+  if (!dataRecord(input) || Object.keys(input).length !== proposalKeys.length
+    || Object.keys(input).some(key => !proposalKeys.includes(key))) return fail('Invalid proposal fields.');
+  if (typeof input.id !== 'string'
+    || !/^prop-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.id)) return fail('Invalid proposal id.');
+  if (input.requiresElevation !== false) return fail('Only non-elevated proposals are permitted.');
+  if (typeof input.catalogActionId !== 'string' || typeof input.platform !== 'string'
+    || !['windows', 'macos', 'ubuntu'].includes(input.platform)) return fail('Invalid action or platform.');
+  const definition = getCatalogAction(input.catalogActionId, input.platform as DevicePlatform);
+  if (!definition) return fail(getUnavailableCatalogReason(input.catalogActionId, input.platform as DevicePlatform) ?? 'This action is not approved.');
+  if (input.catalogVersion !== definition.version) return fail('Unsupported catalog version. Review the current action before proceeding.');
+  const target = closeTarget(input.parameters);
+  if (!target || !boundedStrings(input.evidenceIds, 1)) return fail('Explicit target identity and supporting evidence references are required.');
+  for (const key of ['consequences', 'rollbackInstructions', 'followUpCheckIds'] as const) {
+    const value = input[key];
+    if (!boundedStrings(value, 1) || value.length !== definition[key].length
+      || value.some((entry, index) => entry !== definition[key][index])) return fail('Proposal text must match the reviewed catalog.');
   }
-  const p = input as Partial<RemediationProposal>;
-
-  if (typeof p.id !== 'string' || !p.id.trim()) {
-    return { ok: false, error: 'Proposal requires a valid string id.' };
-  }
-  if (typeof p.catalogActionId !== 'string') {
-    return { ok: false, error: 'Proposal requires a valid catalogActionId.' };
-  }
-  if (p.requiresElevation !== false) {
-    return { ok: false, error: 'Security violation: only non-elevated catalog actions (requiresElevation: false) are permitted.' };
-  }
-  if (!p.platform || !['windows', 'macos', 'ubuntu'].includes(p.platform)) {
-    return { ok: false, error: 'Invalid device platform specified.' };
-  }
-
-  const def = getCatalogAction(p.catalogActionId, p.platform as DevicePlatform);
-  if (!def) {
-    return { ok: false, error: `Catalog action "${p.catalogActionId}" is not approved for platform "${p.platform}".` };
-  }
-
-  if (!Array.isArray(p.evidenceIds) || p.evidenceIds.some((e) => typeof e !== 'string')) {
-    return { ok: false, error: 'evidenceIds must be an array of strings.' };
-  }
-
-  return {
-    ok: true,
-    value: {
-      id: p.id,
-      catalogActionId: def.id,
-      catalogVersion: def.version,
-      platform: def.platform,
-      evidenceIds: p.evidenceIds,
-      parameters: (p.parameters && typeof p.parameters === 'object') ? p.parameters : {},
-      consequences: [...def.consequences],
-      rollbackInstructions: [...def.rollbackInstructions],
-      followUpCheckIds: [...def.followUpCheckIds],
-      requiresElevation: false,
-    },
-  };
+  return { ok: true, value: {
+    id: input.id, catalogActionId: definition.id, catalogVersion: definition.version, platform: definition.platform,
+    evidenceIds: [...input.evidenceIds], parameters: { ...target },
+    consequences: [...definition.consequences], rollbackInstructions: [...definition.rollbackInstructions],
+    followUpCheckIds: [...definition.followUpCheckIds], requiresElevation: false,
+  } };
 }
