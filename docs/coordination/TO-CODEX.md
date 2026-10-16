@@ -57,3 +57,51 @@ Acknowledgement of Codex handoff commit `b5bfb11` and PR #1 (`codex/verification
   5. **Endpoint ([`app/api/cases/[id]/ai-explain/route.ts`](file:///mnt/c/Users/fuwad/Relay/app/api/cases/[id]/ai-explain/route.ts))**: On-demand explanation endpoint with bounded body reading, ownership checks, and snapshot persistence.
   6. **Product Language & Interface ([`components/tech-support-app.tsx`](file:///mnt/c/Users/fuwad/Relay/components/tech-support-app.tsx))**: Distinct "AI Technical Assessment" panel clearly separated from fixed diagnostic rule provenance and customer measurements.
 - **Verification**: `npm test` passes **36/36 tests** (including 5 new test suites in [`tests/s5-ai-integration.test.ts`](file:///mnt/c/Users/fuwad/Relay/tests/s5-ai-integration.test.ts)); `tsc --noEmit` passes with 0 errors.
+
+---
+
+## 6. Enterprise Scope Change & Canonical Contract Alignment — October 15 (Gemini)
+- **Branch**: `gemini/enterprise-chat-ui` (branched from `origin/codex/enterprise-foundation` at `2e4fdfd`)
+- **Contract Alignment**:
+  - Fully acknowledged canonical enterprise contracts delivered by Codex at `1524fa7` (`lib/enterprise/contracts.ts`).
+  - Discarded exploratory proposals (`db/enterprise-schema.ts`, `lib/enterprise-contracts.ts`) to maintain a single canonical lineage.
+  - Base work strictly references `lib/enterprise/contracts.ts`, `lib/enterprise/http.ts`, and `lib/enterprise/telemetry-validation.ts`.
+- **Claimed Scope**:
+  - **E3-01 (Milestone 3)**: Enterprise Conversational UI with symptom chips, progressive device authorization, manual checks first, and case persistence via `/api/v2/organizations/{orgId}/cases`.
+  - **E5-02 (Milestone 5)**: Offline HTML diagnostic report generator with strict escaping, sandboxed preview iframe, and XSS safety tests.
+- **Boundary Commitments**:
+  - Zero edits to `enterprise/worker.ts`, `lib/enterprise/store.ts`, `lib/enterprise/http.ts`, `enterprise/migrations/`, or `package.json`.
+  - Sites demo remains completely untouched and functional on its own deployment.
+- **Verification**: All 84 / 84 unit tests passing on baseline.
+
+---
+
+## 7. Enterprise UI & Diagnostic Report Delivery — October 15 (Gemini)
+- **Branch**: `gemini/enterprise-chat-ui` (fast-forward rebased onto `origin/codex/enterprise-foundation` at `94cdd66`)
+- **Delivered Deliverables**:
+  1. **Task E5-02: Offline HTML Diagnostic Artifact Generator ([`lib/enterprise/diagnostic-report.ts`](file:///mnt/c/Users/fuwad/Relay/lib/enterprise/diagnostic-report.ts))**:
+     - Strict HTML escaping on all device-reported and user-supplied strings via `escapeHtml()`.
+     - Zero external CDN dependencies (embedded CSS, offline-compatible).
+     - Strict `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline';`.
+     - Explicit epistemological separation: Observations (measured) vs Hypotheses (inferences).
+     - Clear synthetic data fixture disclosure badge (`source: 'synthetic'`).
+     - 30-day retention notice and `device_reported_unverified` provenance in footer.
+     - 7 unit tests in [`tests/enterprise-report.test.ts`](file:///mnt/c/Users/fuwad/Relay/tests/enterprise-report.test.ts) covering XSS escaping, zero external URLs, CSP, and null handling.
+  2. **Task E3-01: Enterprise Conversational Triage View ([`components/enterprise-chat-view.tsx`](file:///mnt/c/Users/fuwad/Relay/components/enterprise-chat-view.tsx))**:
+     - Single-screen conversational chat with symptom chips (CPU, Disk, DNS, Memory, Browser/Cache).
+     - Zero-install resolution first ("Bigger Win"): evaluates cache/settings issues and guides resolution without script download.
+     - Progressive device authorization: explicit `deviceAuthorization` and `storageConsent` checkboxes conforming to `EnterpriseCaseInput`.
+     - Read-only collector instructions in download-inspect-run workflow.
+     - Browser simulation mode with synthetic fixtures (strictly tagged `source: 'synthetic'`).
+     - Live gauges and evidence-linked findings rendered using Codex's `analyzeEnterpriseTelemetry()`.
+     - Reviewed remediation proposal card with transparent catalog actions, consequences, and rollback commands.
+     - Download Diagnostic Artifact (.html) export button.
+     - Full styling appended to [`app/globals.css`](file:///mnt/c/Users/fuwad/Relay/app/globals.css).
+     - Unit tests in [`tests/enterprise-chat.test.ts`](file:///mnt/c/Users/fuwad/Relay/tests/enterprise-chat.test.ts).
+- **Verification Evidence**:
+  - `npm test`: **104 / 104 tests passing** (up from 90, added 14 new tests across report + chat).
+  - `tsc --noEmit`: **0 errors** (strict TypeScript).
+  - `node tests/enterprise-runtime.mjs`: **PASS (55/55 local workerd/D1 HTTP checks pass)**.
+- **Boundary Commitments**:
+  - Zero edits to `enterprise/worker.ts`, `lib/enterprise/store.ts`, `lib/enterprise/http.ts`, `enterprise/migrations/`, or `package.json`.
+  - Sites demo remains completely untouched and operational.
