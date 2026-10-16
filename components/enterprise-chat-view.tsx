@@ -656,3 +656,5 @@ export function EnterpriseChatView({
     </div>
   );
 }
+
+export default EnterpriseChatView;
