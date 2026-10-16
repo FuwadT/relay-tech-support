@@ -50,7 +50,9 @@ export interface EnterpriseChatViewProps {
   organizationName?: string;
   userId?: string;
   userRole?: 'requester' | 'technician' | 'administrator';
+  initialCategory?: 'performance' | 'network';
   onNavigateHome?: () => void;
+  onSwitchToManualForm?: () => void;
 }
 
 interface ChatMessage {
@@ -71,6 +73,16 @@ const SYMPTOM_CHIPS = [
   { label: '🧠 Memory Leak', prompt: 'An application is consuming all available RAM over time and causing system slowdown.' },
   { label: '⚡ Browser Glitch', prompt: 'A web portal is failing to load properly; I need help clearing localized browser cache and permissions.' },
 ];
+
+function getInitialWelcomeText(cat?: 'performance' | 'network') {
+  if (cat === 'performance') {
+    return `Hello! I've started a new case for **Computer Performance & Speed**.\n\nPlease describe what you are noticing (e.g. sluggish apps, freezing, high fan noise), or select a symptom below to begin zero-install guidance and read-only telemetry checks.`;
+  }
+  if (cat === 'network') {
+    return `Hello! I've started a new case for **Internet & Wi-Fi Connectivity**.\n\nPlease describe what you are noticing (e.g. dropping connections, slow browsing, DNS errors), or select a symptom below to begin zero-install guidance and read-only telemetry checks.`;
+  }
+  return `Hello! I've started a new diagnostic case for your device.\n\nPlease describe the issue you are experiencing, or select one of the common symptoms below. If this can be solved with browser or system configuration steps, I will resolve it immediately with zero downloads!`;
+}
 
 /** Sample synthetic telemetry datasets for browser simulation (explicitly flagged synthetic). */
 function getSyntheticTelemetry(platform: DevicePlatform, scenario: 'cpu' | 'disk' | 'dns' | 'memory'): TelemetrySnapshot {
@@ -140,13 +152,15 @@ export function EnterpriseChatView({
   organizationName = 'Acme Corp',
   userId = 'user-requester-001',
   userRole = 'requester',
+  initialCategory,
   onNavigateHome,
+  onSwitchToManualForm,
 }: EnterpriseChatViewProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'welcome',
       sender: 'assistant',
-      text: `Hello! I am Relay's interactive diagnostic assistant for **${organizationName}**.\n\nPlease describe the issue you are experiencing, or select one of the common symptoms below. If this can be solved with browser or system configuration steps, I will resolve it immediately with zero downloads!`,
+      text: getInitialWelcomeText(initialCategory),
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
@@ -480,11 +494,18 @@ export function EnterpriseChatView({
           <h2>Relay Diagnostic Assistant</h2>
           <span className="text-muted text-sm">Non-Elevated · Zero-Install Resolution First · Evidence-Linked</span>
         </div>
-        {onNavigateHome && (
-          <button onClick={onNavigateHome} className="button secondary btn-sm">
-            Exit to Overview
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {onSwitchToManualForm && (
+            <button onClick={onSwitchToManualForm} className="button secondary btn-sm">
+              Switch to manual form
+            </button>
+          )}
+          {onNavigateHome && (
+            <button onClick={onNavigateHome} className="button secondary btn-sm">
+              Exit to Overview
+            </button>
+          )}
+        </div>
       </header>
 
       {/* Symptom Chips Bar */}

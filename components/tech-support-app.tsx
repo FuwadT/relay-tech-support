@@ -115,6 +115,7 @@ export default function TechSupportApp({
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('all');
   const [status, setStatus] = useState('all');
+  const [triageCategory, setTriageCategory] = useState<Category | undefined>(undefined);
   const [step, setStep] = useState(0);
   const [notes, setNotes] = useState('');
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -311,10 +312,11 @@ export default function TechSupportApp({
 
   function start(c?: Category) {
     if (busy) return;
+    setTriageCategory(c);
     if (!submissionRef.current && !form.title && !form.description && !form.deviceName && !draftRestored) {
       setForm({ ...initial, category: c ?? 'performance' });
     }
-    navigate('new');
+    navigate('triage');
   }
 
   function syncMeasurementInputs(c: CaseRecord) {
@@ -607,17 +609,6 @@ export default function TechSupportApp({
             <LayoutDashboard size={19} />
             Overview
           </button>
-          <button
-            aria-current={view === 'triage' ? 'page' : undefined}
-            className={view === 'triage' ? 'nav-item active' : 'nav-item'}
-            onClick={() => navigate('triage')}
-          >
-            <Sparkles size={19} />
-            AI Triage
-            <span className="nav-count" style={{ background: '#fbf2eb', color: '#a44526', borderColor: '#eedad0' }}>
-              Live
-            </span>
-          </button>
           {isStaff && (
             <button
               className={view === 'queue' ? 'nav-item active' : 'nav-item'}
@@ -647,9 +638,13 @@ export default function TechSupportApp({
             <BarChart3 size={19} />
             Metrics
           </button>
-          <button aria-current={view === 'new' ? 'page' : undefined} className={view === 'new' ? 'nav-item active' : 'nav-item'} onClick={() => start()}>
+          <button
+            aria-current={view === 'triage' || view === 'new' ? 'page' : undefined}
+            className={view === 'triage' || view === 'new' ? 'nav-item active' : 'nav-item'}
+            onClick={() => start()}
+          >
             <Plus size={19} />
-            New case
+            Start a case
           </button>
         </nav>
         <div className="sidebar-bottom">
@@ -677,7 +672,7 @@ export default function TechSupportApp({
               {view === 'detail'
                 ? 'Case details'
                 : view === 'new'
-                ? 'New case'
+                ? 'Manual intake form'
                 : view === 'queue'
                 ? 'Support queue'
                 : view === 'metrics'
@@ -685,7 +680,7 @@ export default function TechSupportApp({
                 : view === 'cases'
                 ? 'My cases'
                 : view === 'triage'
-                ? 'AI Diagnostic Assistant'
+                ? 'Start a case · AI Triage'
                 : 'Overview'}
             </span>
           </div>
@@ -802,17 +797,17 @@ export default function TechSupportApp({
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
                     <Sparkles size={18} style={{ color: '#a44526' }} />
-                    <strong style={{ fontSize: '15px' }}>Interactive AI Triage & Telemetry</strong>
+                    <strong style={{ fontSize: '15px' }}>Start a Case with Interactive AI Triage</strong>
                     <span className="badge" style={{ background: '#fbf2eb', color: '#a44526', fontSize: '10px' }}>
-                      Non-Elevated
+                      Guided & Read-Only
                     </span>
                   </div>
                   <p style={{ fontSize: '13px', margin: 0, color: '#65635f' }}>
                     Diagnose system issues interactively with zero-install guidance, local read-only telemetry scripts, and evidence-linked findings.
                   </p>
                 </div>
-                <button className="button primary" onClick={() => navigate('triage')}>
-                  Launch AI Assistant
+                <button className="button primary" onClick={() => start()}>
+                  Start a case
                   <ArrowRight size={16} />
                 </button>
               </div>
@@ -878,10 +873,12 @@ export default function TechSupportApp({
           {view === 'triage' && (
             <EnterpriseChatView
               organizationId="org-pilot-01"
-              organizationName="Relay Interactive Assistant"
+              organizationName="Relay Diagnostic Assistant"
               userId={currentUser?.userId || 'user-customer'}
               userRole={currentUser?.role === 'admin' ? 'administrator' : currentUser?.role === 'support' ? 'technician' : 'requester'}
+              initialCategory={triageCategory}
               onNavigateHome={() => navigate('overview')}
+              onSwitchToManualForm={() => navigate('new')}
             />
           )}
 
