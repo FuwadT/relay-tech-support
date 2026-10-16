@@ -38,14 +38,26 @@ test('sampled CPU uses elapsed deltas and logical capacity; unknown or reused PI
   assert.doesNotMatch(result.safeName, /[<>]/);
 });
 
-test('failed system reads emit null evidence and bounded error codes instead of zero readings', windows, () => {
-  const result = powershell(". './enterprise/collectors/windows.ps1'; function Get-CimInstance { throw 'synthetic fixture error, do not expose this'; }; Invoke-WindowsSnapshot | ConvertTo-Json -Depth 8 -Compress");
-  assert.equal(validateTelemetrySnapshot(result).ok, true, 'Failure snapshot must conform to canonical import schema');
-  for (const field of ['cpuPercent', 'memoryTotalMb', 'memoryUsedMb', 'diskTotalGb', 'diskFreeGb', 'dnsResolved', 'gatewayLatencyMs', 'sampleIntervalMs']) assert.equal(result[field], null);
+test('unverified required OS or architecture metadata refuses output with a fixed safe error', windows, () => {
+  const command = ". './enterprise/collectors/windows.ps1'; function Get-CimInstance { throw 'synthetic fixture error, do not expose this'; }; Invoke-WindowsSnapshot | ConvertTo-Json -Depth 8 -Compress";
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command],
+    { encoding: 'utf8', windowsHide: true, timeout: 30000 });
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stdout.trim(), '', 'Unverified platform must not fabricate a canonical snapshot');
+  assert.match(result.stderr, /requires a verified Windows 11 x64 workstation/);
+  assert.doesNotMatch(result.stderr, /synthetic fixture error/);
+});
+
+test('verified Windows metadata allows partial measurement failures to remain null', windows, () => {
+  const result = powershell(". './enterprise/collectors/windows.ps1'; function Get-CimInstance { param($ClassName) switch ($ClassName) { 'Win32_OperatingSystem' { [pscustomobject]@{Version='10.0.26100';BuildNumber=26100;ProductType=1;TotalVisibleMemorySize=$null;FreePhysicalMemory=$null;SystemDrive='C:'} } 'Win32_Processor' { [pscustomobject]@{Architecture=9;NumberOfLogicalProcessors=8} } 'Win32_LogicalDisk' { throw 'synthetic disk failure' } } }; function Get-Process { throw 'synthetic process failure' }; Invoke-WindowsSnapshot | ConvertTo-Json -Depth 8 -Compress");
+  assert.equal(validateTelemetrySnapshot(result).ok, true);
+  assert.equal(result.architecture, 'x64');
+  for (const field of ['cpuPercent', 'memoryTotalMb', 'memoryUsedMb', 'diskTotalGb', 'diskFreeGb']) assert.equal(result[field], null);
   assert.deepEqual(result.processes, []);
-  assert.deepEqual(result.eventExcerpts, []);
-  assert.ok(result.errors.length > 0 && result.errors.length <= 32);
-  assert.doesNotMatch(JSON.stringify(result), /synthetic fixture error/);
+  assert.ok(result.errors.some((error: { checkId: string }) => error.checkId === 'memory'));
+  assert.ok(result.errors.some((error: { checkId: string }) => error.checkId === 'system-drive'));
+  assert.ok(result.errors.length <= 32);
+  assert.doesNotMatch(JSON.stringify(result), /synthetic disk failure|synthetic process failure/);
 });
 
 test('fixture memory and storage use decimal units; optional network remains explicitly unavailable', windows, () => {
@@ -74,8 +86,7 @@ test('native Windows snapshot satisfies canonical parser without collecting logs
   assert.deepEqual(result.eventExcerpts, []);
   assert.ok(result.processes.length <= 20 && result.errors.length <= 32);
   assert.ok(result.errors.some((error: { checkId: string }) => error.checkId === 'event-excerpts-not-collected'));
-  if (!result.errors.some((error: { checkId: string }) => error.checkId === 'windows11-x64-required')) {
-    assert.ok(result.sampleIntervalMs >= 1000, 'Collector must report its measured one-second sampling window');
-    assert.ok(result.processes.every((sample: { cpuPercent: number | null }) => sample.cpuPercent === null || (sample.cpuPercent >= 0 && sample.cpuPercent <= 100)));
-  }
+  assert.equal(result.architecture, 'x64');
+  assert.ok(result.sampleIntervalMs >= 1000, 'Collector must report its measured one-second sampling window');
+  assert.ok(result.processes.every((sample: { cpuPercent: number | null }) => sample.cpuPercent === null || (sample.cpuPercent >= 0 && sample.cpuPercent <= 100)));
 });

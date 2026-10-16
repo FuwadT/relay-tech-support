@@ -75,7 +75,7 @@ function Invoke-WindowsSnapshot {
     $errors = New-Object 'System.Collections.Generic.List[object]'
     $snapshot = [ordered]@{
         schemaVersion = 1; collectionId = $CollectionId.ToLowerInvariant(); platform = 'windows'
-        osVersion = 'unknown'; architecture = 'x64'; source = 'collector'; collectorVersion = '1.0.0'
+        osVersion = 'unknown'; architecture = $null; source = 'collector'; collectorVersion = '1.0.0'
         collectedAt = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
         sampleIntervalMs = $null; cpuPercent = $null; memoryTotalMb = $null; memoryUsedMb = $null
         diskTotalGb = $null; diskFreeGb = $null; dnsResolved = $null; gatewayLatencyMs = $null
@@ -93,14 +93,16 @@ function Invoke-WindowsSnapshot {
         $processors = @(Get-CimInstance -ClassName Win32_Processor -OperationTimeoutSec 3 -ErrorAction Stop)
         if ($os.Version -match '^[0-9.]{1,100}$') { $snapshot.osVersion = [string]$os.Version }
         $architectures = @($processors | Select-Object -ExpandProperty Architecture -Unique)
-        if ($architectures.Count -eq 1 -and $architectures[0] -eq 12) { $snapshot.architecture = 'arm64' }
         $supported = ([int]$os.BuildNumber -ge 22000 -and [int]$os.ProductType -eq 1 -and
-            $architectures.Count -eq 1 -and $architectures[0] -eq 9)
+            $architectures.Count -eq 1 -and $architectures[0] -eq 9 -and $snapshot.osVersion -ne 'unknown')
+        if ($supported) { $snapshot.architecture = 'x64' }
         $logical = ($processors | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
         if ($logical -lt 1) { $logical = $null }
     } catch { Add-CollectionError $errors 'windows-version-or-architecture' 'unavailable' }
     if (-not $supported) {
-        Add-CollectionError $errors 'windows11-x64-required' 'unsupported'
+        # Architecture/version are required canonical metadata. Unknown values
+        # cannot be represented honestly as a snapshot, so refuse without data.
+        throw 'Relay collector requires a verified Windows 11 x64 workstation.'
     } else {
         try {
             if ($null -eq $os.TotalVisibleMemorySize -or $null -eq $os.FreePhysicalMemory) { throw 'Memory unavailable' }
