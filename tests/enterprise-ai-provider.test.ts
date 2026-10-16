@@ -1,0 +1,183 @@
+/**
+ * Tests for Enterprise AI Provider Adapter (Task E6-01).
+ * Verifies model allowlists, structured output safety, prohibition of executable code,
+ * deterministic fallback, and cross-provider isolation.
+ */
+
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+import type { DevicePlatform, EvidenceFinding, TelemetrySnapshot } from '../lib/enterprise/contracts';
+import {
+  APPROVED_DIAGNOSTIC_CHECK_IDS,
+  buildDeterministicFallback,
+  executeAIAnalysis,
+  validateStructuredAIOutput,
+  type AIAnalysisRequest,
+  type AIProviderConfig,
+} from '../lib/enterprise/ai-provider-adapter';
+
+const mockSnapshot: TelemetrySnapshot = {
+  schemaVersion: 1,
+  collectionId: 'c1111111-2222-4333-8444-555555555555',
+  platform: 'windows',
+  osVersion: 'Windows 11',
+  architecture: 'x64',
+  source: 'collector',
+  collectorVersion: '1.0.0',
+  collectedAt: new Date().toISOString(),
+  sampleIntervalMs: 5000,
+  cpuPercent: 92.0,
+  memoryTotalMb: 16384,
+  memoryUsedMb: 8000,
+  diskTotalGb: 512,
+  diskFreeGb: 200,
+  dnsResolved: true,
+  gatewayLatencyMs: 15,
+  processes: [{ pid: 101, name: 'SearchIndexer.exe', cpuPercent: 88, memoryMb: 400 }],
+  eventExcerpts: [],
+  errors: [],
+};
+
+const mockFindings: EvidenceFinding[] = [
+  {
+    id: 'cpu-high',
+    severity: 'warning',
+    observation: 'CPU is recorded as 92.0%.',
+    hypothesis: 'Possible resource contention.',
+    evidenceIds: ['/cpuPercent'],
+    recommendedCheckIds: [],
+    ruleVersion: '1.0.0',
+  },
+];
+
+const mockRequest: AIAnalysisRequest = {
+  platform: 'windows',
+  caseTitle: 'High CPU utilization',
+  caseDescription: 'Fans running at maximum speed',
+  snapshot: mockSnapshot,
+  findings: mockFindings,
+};
+
+describe('E6-01: Structured AI Output Safety Boundary', () => {
+  it('accepts valid structured output with approved catalog action and check IDs', () => {
+    const validOutput = {
+      technicalSummary: 'Telemetry shows high CPU utilization isolated to user-level process.',
+      selectedCatalogActionId: 'win-proc-graceful-request',
+      recommendedCheckIds: ['cpu_usage_check'],
+    };
+
+    const result = validateStructuredAIOutput(validOutput, 'windows');
+    assert.strictEqual(result.ok, true);
+    if (result.ok) {
+      assert.strictEqual(result.value.selectedCatalogActionId, 'win-proc-graceful-request');
+      assert.deepStrictEqual(result.value.recommendedCheckIds, ['cpu_usage_check']);
+    }
+  });
+
+  it('rejects output containing executable code blocks or hazardous shell commands', () => {
+    const hostileOutputs = [
+      {
+        technicalSummary: 'Here is the fix:\n```bash\nsudo rm -rf /var/cache\n```',
+        selectedCatalogActionId: null,
+        recommendedCheckIds: [],
+      },
+      {
+        technicalSummary: 'Run this: kill -9 1234',
+        selectedCatalogActionId: null,
+        recommendedCheckIds: [],
+      },
+      {
+        technicalSummary: '<script>alert("pwned")</script>',
+        selectedCatalogActionId: null,
+        recommendedCheckIds: [],
+      },
+      {
+        technicalSummary: 'Edit registry with Set-ItemProperty HKLM:\\...',
+        selectedCatalogActionId: null,
+        recommendedCheckIds: [],
+      },
+    ];
+
+    for (const hostile of hostileOutputs) {
+      const result = validateStructuredAIOutput(hostile, 'windows');
+      assert.strictEqual(
+        result.ok,
+        false,
+        `Must reject output with hostile content: ${hostile.technicalSummary}`,
+      );
+      if (!result.ok) {
+        assert.ok(result.error.includes('Security violation'));
+      }
+    }
+  });
+
+  it('rejects unapproved or platform-mismatched catalogActionId', () => {
+    const mismatchedOutput = {
+      technicalSummary: 'Flush the mDNS cache.',
+      // mac action on windows platform
+      selectedCatalogActionId: 'mac-net-flush-dns',
+      recommendedCheckIds: [],
+    };
+
+    const result = validateStructuredAIOutput(mismatchedOutput, 'windows');
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.ok(result.error.includes('not in the approved catalog for platform "windows"'));
+    }
+  });
+
+  it('filters out non-allowlisted diagnostic check IDs', () => {
+    const outputWithBogusChecks = {
+      technicalSummary: 'Diagnostic check recommendation.',
+      selectedCatalogActionId: null,
+      recommendedCheckIds: ['cpu_usage_check', 'arbitrary_shell_injection_check', 'net_adapter_power_save'],
+    };
+
+    const result = validateStructuredAIOutput(outputWithBogusChecks, 'windows');
+    assert.strictEqual(result.ok, true);
+    if (result.ok) {
+      assert.deepStrictEqual(result.value.recommendedCheckIds, ['cpu_usage_check', 'net_adapter_power_save']);
+      assert.ok(!result.value.recommendedCheckIds.includes('arbitrary_shell_injection_check'));
+    }
+  });
+});
+
+describe('E6-01: Provider Controls, Allowlists, and Deterministic Fallback', () => {
+  it('falls back deterministically when AI is disabled by organization admin', async () => {
+    const config: AIProviderConfig = {
+      provider: 'anthropic',
+      apiKey: 'sk-ant-test-key',
+      model: 'claude-3-5-sonnet',
+      modelAllowlist: ['claude-3-5-sonnet'],
+      enabled: false, // Disabled!
+    };
+
+    const result = await executeAIAnalysis(config, mockRequest);
+    assert.strictEqual(result.isFallback, true);
+    assert.strictEqual(result.provider, 'anthropic');
+    assert.ok(result.fallbackReason?.includes('disabled'));
+    assert.strictEqual(result.output.selectedCatalogActionId, 'win-proc-graceful-request');
+  });
+
+  it('falls back deterministically when requested model is not in the allowlist', async () => {
+    const config: AIProviderConfig = {
+      provider: 'openai',
+      apiKey: 'sk-proj-test-key',
+      model: 'gpt-4o-unapproved-model',
+      modelAllowlist: ['gpt-4o-mini'], // gpt-4o-unapproved-model is not allowlisted!
+      enabled: true,
+    };
+
+    const result = await executeAIAnalysis(config, mockRequest);
+    assert.strictEqual(result.isFallback, true);
+    assert.ok(result.fallbackReason?.includes('not in the approved allowlist'));
+  });
+
+  it('preserves provider isolation: fallback never routes to another provider', () => {
+    const geminiFallback = buildDeterministicFallback(mockRequest, 'Quota exceeded', 'gemini');
+    assert.strictEqual(geminiFallback.provider, 'gemini');
+
+    const anthropicFallback = buildDeterministicFallback(mockRequest, 'Timeout', 'anthropic');
+    assert.strictEqual(anthropicFallback.provider, 'anthropic');
+  });
+});

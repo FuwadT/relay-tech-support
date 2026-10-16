@@ -105,3 +105,35 @@ Acknowledgement of Codex handoff commit `b5bfb11` and PR #1 (`codex/verification
 - **Boundary Commitments**:
   - Zero edits to `enterprise/worker.ts`, `lib/enterprise/store.ts`, `lib/enterprise/http.ts`, `enterprise/migrations/`, or `package.json`.
   - Sites demo remains completely untouched and operational.
+
+---
+
+## 8. AI Provider Adapters & Remediation Catalog Delivery — October 15 (Gemini)
+- **Branch**: `gemini/enterprise-chat-ui` (latest commits)
+- **Delivered Deliverables**:
+  1. **Task E7-01: Reviewed Remediation Catalog ([`lib/enterprise/remediation-catalog.ts`](file:///mnt/c/Users/fuwad/Relay/lib/enterprise/remediation-catalog.ts))**:
+     - Versioned catalog actions per platform (Windows 11, macOS Apple Silicon, Ubuntu x64).
+     - Strict non-elevated safety guarantee: `requiresElevation: false` enforced at type level.
+     - Prohibits: force-kill (SIGKILL / `kill -9`), privileged service changes, destructive cleanup (`rm -rf`), Windows registry edits, and elevation prompts (`sudo` / UAC).
+     - Every action defines prerequisites, consequences, rollback instructions, and follow-up check IDs.
+     - Script renderer produces transparent user-run scripts for local inspection.
+     - `validateRemediationProposal()` validates proposals against catalog allowlists.
+     - 10 unit tests in [`tests/enterprise-remediation.test.ts`](file:///mnt/c/Users/fuwad/Relay/tests/enterprise-remediation.test.ts).
+  2. **Task E6-01: Model Provider Adapters & Validation ([`lib/enterprise/ai-provider-adapter.ts`](file:///mnt/c/Users/fuwad/Relay/lib/enterprise/ai-provider-adapter.ts))**:
+     - Adapters for OpenAI, Anthropic, and Gemini.
+     - Model allowlist check (`modelAllowlist`): unapproved models are blocked from dispatch.
+     - Strict structured output validation (`validateStructuredAIOutput`):
+       - Rejects executable code blocks (```` ``` ````), script tags, `sudo`, `kill -9`, `Set-ItemProperty`.
+       - Models select approved catalog action IDs only; cannot generate arbitrary shell code.
+       - Restricts recommended check IDs to approved list (`APPROVED_DIAGNOSTIC_CHECK_IDS`).
+     - Deterministic rule-grounded fallback: activates when unconfigured, disabled, timed out, or invalid.
+     - Provider isolation: never routes customer telemetry across different providers.
+     - 7 unit tests in [`tests/enterprise-ai-provider.test.ts`](file:///mnt/c/Users/fuwad/Relay/tests/enterprise-ai-provider.test.ts).
+- **Verification Evidence**:
+  - `npm test`: **129 / 129 tests passing** (up from 112, added 17 new tests across remediation + AI provider).
+  - `tsc --noEmit`: **0 errors** (strict TypeScript).
+  - `node tests/enterprise-runtime.mjs`: **PASS (55/55 local workerd/D1 HTTP checks pass)**.
+- **Boundary Commitments**:
+  - Zero edits to `enterprise/worker.ts`, `lib/enterprise/store.ts`, `lib/enterprise/http.ts`, `enterprise/migrations/`, or `package.json`.
+  - Sites demo remains completely untouched and operational.
+
