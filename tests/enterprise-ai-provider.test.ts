@@ -10,6 +10,7 @@ import type { EvidenceFinding, TelemetrySnapshot } from '../lib/enterprise/contr
 import {
   buildDeductiveTriage,
   buildDeterministicFallback,
+  buildGeminiContents,
   executeAIAnalysis,
   executeDeductiveTriage,
   validateDeductiveTriageResponse,
@@ -351,6 +352,39 @@ describe('Phase 2: Multi-Turn Deductive Triage & Hypothesis Pruning', () => {
       conversationHistory: history3,
     });
     assert.ok(!t4.reply.includes('did this behavior begin suddenly today'));
+  });
+});
+
+describe('Phase 3: Gemini API Multi-Turn Content Formatting Invariant', () => {
+  it('strictly alternates roles, drops leading assistant greetings, and merges consecutive turns', () => {
+    const history: Array<{ sender: 'user' | 'assistant'; text: string }> = [
+      { sender: 'assistant', text: 'Hello! What seems to be the issue?' },
+      { sender: 'user', text: 'my computer is slow' },
+      { sender: 'user', text: 'fans are spinning loud' },
+      { sender: 'assistant', text: 'Running probe...' },
+      { sender: 'assistant', text: 'Probe complete: CPU 95%' },
+    ];
+
+    const turns = buildGeminiContents(history, 'still happening what should I do next?', '[Context: Windows 11]');
+
+    // Must start with user
+    assert.strictEqual(turns[0].role, 'user');
+    assert.ok(turns[0].parts[0].text.includes('[Context: Windows 11]'));
+    // The two user messages must be merged
+    assert.strictEqual(turns[0].parts.length, 2);
+
+    // Turn 1 must be model (assistant probe messages merged)
+    assert.strictEqual(turns[1].role, 'model');
+    assert.strictEqual(turns[1].parts.length, 2);
+
+    // Turn 2 must be user (the current message)
+    assert.strictEqual(turns[2].role, 'user');
+    assert.strictEqual(turns[2].parts[0].text, 'still happening what should I do next?');
+
+    // Strict alternation check: no turn has the same role as the previous
+    for (let i = 1; i < turns.length; i++) {
+      assert.notStrictEqual(turns[i].role, turns[i - 1].role);
+    }
   });
 });
 

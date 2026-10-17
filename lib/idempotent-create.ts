@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, lt, sql } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import type * as schema from '../db/schema';
 import { cases, caseCreateRequests } from '../db/schema';
@@ -66,4 +66,53 @@ export async function createIdempotentCase(db: DrizzleD1Database<typeof schema>,
   if (result.reservation.payloadHash !== hashes.payloadHash) return { outcome: 'conflict' } as const;
   if (!result.case) return { outcome: 'deleted' } as const;
   return { outcome: 'saved', row: result.case, replayed: result.reservation.caseId !== row.id } as const;
+}
+
+/**
+ * Prunes expired in-flight idempotent reservations older than ttlMs (default: 2 minutes).
+ * Deletes rows where created_at < now - ttlMs.
+ * Supports Drizzle ORM instances, node:sqlite DatabaseSync, and Cloudflare D1Database.
+ *
+ * @returns Count of deleted stale reservations.
+ */
+export async function pruneExpiredReservations(
+  db: unknown,
+  ttlMs = 120_000,
+): Promise<number> {
+  const cutoff = new Date(Date.now() - ttlMs).toISOString();
+
+  // Drizzle D1 / SQLite database
+  if (db && typeof (db as Record<string, unknown>).delete === 'function') {
+    const drizzleDb = db as DrizzleD1Database<typeof schema>;
+    const res = await drizzleDb
+      .delete(caseCreateRequests)
+      .where(lt(caseCreateRequests.createdAt, cutoff));
+    return (res as unknown as { rowsAffected?: number })?.rowsAffected ?? 0;
+  }
+
+  // node:sqlite DatabaseSync (in unit tests)
+  if (
+    db &&
+    typeof (db as Record<string, unknown>).exec === 'function' &&
+    typeof (db as Record<string, unknown>).prepare === 'function'
+  ) {
+    const syncDb = db as { prepare: (sql: string) => { run: (...args: unknown[]) => { changes?: number } } };
+    const stmt = syncDb.prepare('DELETE FROM case_create_requests WHERE created_at < ?');
+    const info = stmt.run(cutoff);
+    return info?.changes ?? 0;
+  }
+
+  // Cloudflare D1Database
+  if (db && typeof (db as Record<string, unknown>).prepare === 'function') {
+    const d1 = db as { prepare: (sql: string) => { bind: (...args: unknown[]) => { run: () => Promise<{ meta?: { changes?: number } }> } } };
+    try {
+      const res = await d1.prepare('DELETE FROM case_create_requests WHERE created_at < ?').bind(cutoff).run();
+      return res?.meta?.changes ?? 0;
+    } catch {
+      const res = await d1.prepare('DELETE FROM enterprise_create_requests WHERE created_at < ?').bind(cutoff).run();
+      return res?.meta?.changes ?? 0;
+    }
+  }
+
+  return 0;
 }

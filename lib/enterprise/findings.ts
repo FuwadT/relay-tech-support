@@ -66,33 +66,17 @@ export function analyzeEnterpriseTelemetry(snapshot: TelemetrySnapshot): Evidenc
   return findings;
 }
 
-/** Safe CPU usage formatter avoiding bare '%' when unsampled or NaN. */
-export function formatCpuUsage(cpuPercent?: number | null): string {
-  if (typeof cpuPercent !== 'number' || Number.isNaN(cpuPercent)) {
-    return 'Not sampled';
-  }
-  return `${Math.round(cpuPercent)}%`;
-}
+import {
+  formatCpuUsage,
+  formatMemoryUsage,
+  formatDiskFree,
+} from '../formatters';
 
-/** Safe memory formatter with clean percentages and rounded GB values. */
-export function formatMemoryUsage(usedMb?: number | null, totalMb?: number | null): string {
-  if (typeof usedMb !== 'number' || typeof totalMb !== 'number' || totalMb <= 0) {
-    return 'Not sampled';
-  }
-  const pct = Math.round((usedMb / totalMb) * 100);
-  const usedGb = (usedMb / 1024).toFixed(1);
-  const totalGb = (totalMb / 1024).toFixed(1);
-  return `${pct}% (${usedGb} / ${totalGb} GB)`;
-}
-
-/** Safe disk space formatter with rounded GB and percentage free. */
-export function formatDiskFree(freeGb?: number | null, totalGb?: number | null): string {
-  if (typeof freeGb !== 'number' || typeof totalGb !== 'number' || totalGb <= 0) {
-    return 'Not sampled';
-  }
-  const freePct = Math.round((freeGb / totalGb) * 100);
-  return `${freePct}% free (${Math.round(freeGb)} / ${Math.round(totalGb)} GB)`;
-}
+export {
+  formatCpuUsage,
+  formatMemoryUsage,
+  formatDiskFree,
+};
 
 /**
  * Symptom-aware diagnostic explanation reconciling user-reported symptoms
@@ -198,3 +182,93 @@ export function explainTelemetryQuestion(
 ${findings.length > 0 ? `Identified findings: ${findings.map((f) => f.id).join(', ')}.` : 'No critical thresholds exceeded.'}`;
 }
 
+
+/**
+ * Compares before/after TelemetrySnapshot to verify a remediation action improved system health.
+ * Returns one diff entry per metric that has readings in both snapshots.
+ */
+export interface RemediationDiff {
+  /** Camel-case field name on TelemetrySnapshot, e.g. "cpuPercent". */
+  metric: string;
+  before: number;
+  after: number;
+  /** True when the after value is meaningfully better than the before value. */
+  improved: boolean;
+  /** Human-readable badge, e.g. "CPU ↓ 91% → 12% ✅" */
+  badge: string;
+}
+
+export function verifyRemediationDelta(
+  before: TelemetrySnapshot,
+  after: TelemetrySnapshot,
+): RemediationDiff[] {
+  const diffs: RemediationDiff[] = [];
+
+  // CPU: improved when after drops by more than 5 percentage points
+  if (before.cpuPercent !== null && after.cpuPercent !== null) {
+    const improved = after.cpuPercent < before.cpuPercent - 5;
+    const arrow = after.cpuPercent < before.cpuPercent ? '↓' : '↑';
+    diffs.push({
+      metric: 'cpuPercent',
+      before: before.cpuPercent,
+      after: after.cpuPercent,
+      improved,
+      badge: `CPU ${arrow} ${Math.round(before.cpuPercent)}% → ${Math.round(after.cpuPercent)}% ${improved ? '✅' : '⚠️'}`,
+    });
+  }
+
+  // Memory: improved when after drops by more than 50 MB
+  if (before.memoryUsedMb !== null && after.memoryUsedMb !== null) {
+    const improved = after.memoryUsedMb < before.memoryUsedMb - 50;
+    const arrow = after.memoryUsedMb < before.memoryUsedMb ? '↓' : '↑';
+    const bGb = (before.memoryUsedMb / 1024).toFixed(1);
+    const aGb = (after.memoryUsedMb / 1024).toFixed(1);
+    diffs.push({
+      metric: 'memoryUsedMb',
+      before: before.memoryUsedMb,
+      after: after.memoryUsedMb,
+      improved,
+      badge: `Memory ${arrow} ${bGb} GB → ${aGb} GB ${improved ? '✅' : '⚠️'}`,
+    });
+  }
+
+  // Disk free: improved when after increases by more than 0.05 GB
+  if (before.diskFreeGb !== null && after.diskFreeGb !== null) {
+    const improved = after.diskFreeGb > before.diskFreeGb + 0.05;
+    const arrow = after.diskFreeGb > before.diskFreeGb ? '↑' : '↓';
+    diffs.push({
+      metric: 'diskFreeGb',
+      before: before.diskFreeGb,
+      after: after.diskFreeGb,
+      improved,
+      badge: `Disk Free ${arrow} ${before.diskFreeGb.toFixed(1)} GB → ${after.diskFreeGb.toFixed(1)} GB ${improved ? '✅' : '⚠️'}`,
+    });
+  }
+
+  // Gateway / DNS latency: improved when after is defined and drops by more than 20%
+  const beforeDns = (before as { dnsLatencyMs?: number | null }).dnsLatencyMs;
+  const afterDns = (after as { dnsLatencyMs?: number | null }).dnsLatencyMs;
+  if (typeof beforeDns === 'number' && typeof afterDns === 'number') {
+    const improved = afterDns < beforeDns * 0.8;
+    const arrow = afterDns < beforeDns ? '↓' : '↑';
+    diffs.push({
+      metric: 'dnsLatencyMs',
+      before: beforeDns,
+      after: afterDns,
+      improved,
+      badge: `DNS ${arrow} ${beforeDns} ms → ${afterDns} ms ${improved ? '✅' : '⚠️'}`,
+    });
+  } else if (before.gatewayLatencyMs !== null && after.gatewayLatencyMs !== null) {
+    const improved = after.gatewayLatencyMs < before.gatewayLatencyMs * 0.8;
+    const arrow = after.gatewayLatencyMs < before.gatewayLatencyMs ? '↓' : '↑';
+    diffs.push({
+      metric: 'gatewayLatencyMs',
+      before: before.gatewayLatencyMs,
+      after: after.gatewayLatencyMs,
+      improved,
+      badge: `Gateway Latency ${arrow} ${before.gatewayLatencyMs} ms → ${after.gatewayLatencyMs} ms ${improved ? '✅' : '⚠️'}`,
+    });
+  }
+
+  return diffs;
+}

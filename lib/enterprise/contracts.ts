@@ -118,6 +118,7 @@ export interface DeductiveTriageResponse {
   recommendedAction: 'ask_clarifying_question' | 'run_browser_probe' | 'request_os_collector' | 'propose_remediation' | 'escalate';
   addressedSymptomMismatch?: boolean;
   isFallback?: boolean;
+  fallbackReason?: string;
   providerUsed?: string;
   modelUsed?: string;
 }

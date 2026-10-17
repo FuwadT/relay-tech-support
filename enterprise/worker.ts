@@ -4,6 +4,8 @@ import { createEnterpriseCase, listEnterpriseCases, readEnterpriseCase, resolveE
 import { getCollectorScript } from '../lib/enterprise/collector-scripts';
 import { validateTelemetrySnapshot } from '../lib/enterprise/telemetry-validation';
 import { executeDeductiveTriage } from '../lib/enterprise/ai-provider-adapter';
+import type { DeductiveTriageRequest } from '../lib/enterprise/ai-provider-adapter';
+import { checkRateLimit } from '../lib/rate-limit';
 import type {
   DevicePlatform,
   EnterpriseTriageStage,
@@ -114,7 +116,19 @@ export async function handleEnterpriseRequest(request: Request, env: EnterpriseE
         });
       }
       if (request.method === 'POST') {
-        const body = (await boundedJson(request)) as {
+        const clientIp = request.headers.get('cf-connecting-ip') || '127.0.0.1';
+        const rateCheck = checkRateLimit(`triage:${clientIp}`, {
+          windowMs: 60_000,
+          maxRequests: 20,
+        });
+        if (!rateCheck.allowed) {
+          return json({ ok: false, error: 'Too many requests. Please wait before retrying.' }, 429, {
+            'Retry-After': String(Math.max(1, Math.ceil((rateCheck.resetAt - Date.now()) / 1000))),
+            'X-RateLimit-Reset': String(rateCheck.resetAt),
+          });
+        }
+
+        const body = (await boundedJson(request, 65_536)) as {
           userMessage?: unknown;
           stage?: EnterpriseTriageStage;
           conversationHistory?: Array<{ sender: 'user' | 'assistant'; text: string }>;
@@ -122,6 +136,8 @@ export async function handleEnterpriseRequest(request: Request, env: EnterpriseE
           snapshot?: TelemetrySnapshot | null;
           findings?: EvidenceFinding[];
           hypotheses?: TriageHypothesis[];
+          browserProbe?: DeductiveTriageRequest['browserProbe'];
+          remediation?: DeductiveTriageRequest['remediation'];
           providerConfig?: {
             provider?: ModelProvider;
             apiKey?: string;
@@ -148,17 +164,29 @@ export async function handleEnterpriseRequest(request: Request, env: EnterpriseE
             snapshot: body.snapshot || null,
             findings: body.findings || [],
             hypotheses: body.hypotheses || [],
+            browserProbe: body.browserProbe || null,
+            remediation: body.remediation || null,
           },
           {
             provider,
             apiKey,
-            model: body.providerConfig?.model || (provider === 'gemini' ? 'gemini-2.0-flash' : 'gpt-4o-mini'),
-            modelAllowlist: ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gpt-4o', 'gpt-4o-mini'],
+            model: body.providerConfig?.model || (provider === 'gemini' ? 'gemini-2.5-flash' : 'gpt-4o-mini'),
+            modelAllowlist: [
+              'gemini-2.5-flash',
+              'gemini-2.5-pro',
+              'gemini-2.0-flash',
+              'gemini-1.5-flash',
+              'gemini-1.5-pro',
+              'gpt-4o',
+              'gpt-4o-mini',
+            ],
             enabled: true,
-            timeoutMs: 15000,
+            timeoutMs: 8000,
           }
         );
-        return json({ ok: true, data: result }, 200);
+        return json({ ok: true, data: result }, 200, {
+          'x-relay-ai-mode': result.isFallback ? 'deterministic-fallback' : 'live',
+        });
       }
       return new Response(null, { status: 405, headers: { Allow: 'POST, OPTIONS' } });
     }

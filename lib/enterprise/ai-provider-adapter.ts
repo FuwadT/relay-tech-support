@@ -23,6 +23,7 @@ import type {
   ValidationResult,
 } from './contracts';
 import { getCatalogAction } from './remediation-catalog';
+import { retrieveRunbooks, buildRagPromptContext } from './rag';
 
 export interface AIProviderConfig {
   provider: ModelProvider;
@@ -242,6 +243,24 @@ export interface DeductiveTriageRequest {
   snapshot?: TelemetrySnapshot | null;
   findings?: EvidenceFinding[];
   hypotheses?: TriageHypothesis[];
+  browserProbe?: {
+    platform?: string;
+    hardwareConcurrency?: number | null;
+    deviceMemoryGb?: number | null;
+    networkOnline?: boolean;
+    apiPingMs?: number | null;
+    gpuRenderer?: string | null;
+    isHealthy?: boolean;
+    storageUsageGb?: number | null;
+    storageQuotaGb?: number | null;
+  } | null;
+  remediation?: {
+    actionId: string;
+    title?: string;
+    targetPid?: number;
+    targetProcess?: string;
+    requiresElevation?: boolean;
+  } | null;
 }
 
 /**
@@ -299,8 +318,8 @@ export function buildDeductiveTriage(request: DeductiveTriageRequest): Deductive
     (t) => t.includes('begin suddenly today') || t.includes('gradually degrading'),
   );
 
-  // 1. Intake Discovery: Greeting and open-ended discovery
-  if (stage === 'intake_discovery' || !lowerMsg) {
+  // 1. Intake Discovery: Greeting and open-ended discovery (when message is empty)
+  if (!lowerMsg) {
     return {
       stage: 'deductive_questioning',
       reply: 'Hello! What seems to be the issue you are having today? Describe what is happening in your own words, or pick a common symptom below.',
@@ -321,6 +340,75 @@ export function buildDeductiveTriage(request: DeductiveTriageRequest): Deductive
     };
   }
 
+  // Meta / Operational / Assistant status questions
+  if (/is gemini working|is the ai working|are you (gemini|ai|working)|who are you|what are you/i.test(lowerMsg)) {
+    return {
+      stage: stage === 'active_investigation' ? 'active_investigation' : 'deductive_questioning',
+      reply:
+        'Yes, Relay Assistant is active and ready to assist! When your Gemini API key is connected, responses are synthesized with live telemetry and curated enterprise IT runbooks. What specific issue or symptom are you noticing?',
+      quickReplies: [
+        'Run instant browser check',
+        'Run read-only system check',
+        'Show manual troubleshooting steps',
+      ],
+      hypotheses: [
+        { id: 'hyp-status', domain: 'application', summary: 'AI assistant active and ready for diagnostics', confidence: 1.0, status: 'confirmed' },
+      ],
+      recommendedAction: 'ask_clarifying_question',
+      addressedSymptomMismatch: false,
+    };
+  }
+
+  // Next steps questions (e.g. "still happening what should I do next?", "what should I do next?")
+  if (!snapshot && /what (should|can) i do next|next step|still happening|what now/i.test(lowerMsg)) {
+    return {
+      stage: stage === 'active_investigation' ? 'active_investigation' : 'deductive_questioning',
+      reply:
+        'Since the slowness is still occurring, the recommended next step is to run a read-only OS inspection snapshot to measure CPU, memory, and running processes, or inspect active processes directly in your terminal.',
+      quickReplies: [
+        'Run read-only system check',
+        'Show process inspection command',
+        'Discard background browser tabs',
+      ],
+      hypotheses: [
+        { id: 'hyp-next', domain: 'cpu_thermal', summary: 'Awaiting deeper telemetry to isolate bottleneck', confidence: 0.7, status: 'active' },
+      ],
+      recommendedAction: 'request_os_collector',
+      addressedSymptomMismatch: false,
+    };
+  }
+
+  // Terminal output / remediation feedback handling
+  const isTerminalFeedback =
+    /process not found|belongs to another session|skipped|copied to clipboard|get-process|syntax error|command not found|access is denied/i.test(lowerMsg) ||
+    /ps [a-z]:\\/i.test(lowerMsg) ||
+    lowerMsg.includes('i got this response');
+
+  if (isTerminalFeedback) {
+    const isProcessNotFound = /process not found|belongs to another session|skipped/i.test(lowerMsg);
+    const reply = isProcessNotFound
+      ? 'The remediation script skipped because the target process was either already closed or running in a different Windows session (e.g. system background service). ' +
+        'Since memory usage remains elevated, let’s identify the active memory consumers safely without guessing:\n\n' +
+        '```powershell\nGet-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 5 -Property Id, ProcessName, @{Name="MemoryMB"; Expression={[math]::Round($_.WorkingSet64 / 1MB, 1)}}\n```\n\n' +
+        '**Zero-Install Quick Win**: In your web browser (Chrome/Edge), open `chrome://discards` (or `edge://discards`) to discard dormant background tabs, or enable **Memory Saver** under Settings > Performance.'
+      : 'Thank you for providing the terminal output. Relay will analyze this output alongside your system telemetry. What behavior are you observing right now?';
+
+    return {
+      stage: stage === 'active_investigation' ? 'active_investigation' : 'deductive_questioning',
+      reply,
+      quickReplies: [
+        'Discard browser tabs',
+        'Run memory process check',
+        'Take fresh telemetry sample',
+      ],
+      hypotheses: [
+        { id: 'hyp-mem', domain: 'memory', summary: 'High working set memory pressure across user applications', confidence: 0.9, status: 'confirmed' },
+      ],
+      recommendedAction: 'ask_clarifying_question',
+      addressedSymptomMismatch: false,
+    };
+  }
+
   // 2. Active Investigation: Telemetry snapshot already captured; answer from snapshot
   if (stage === 'active_investigation' && snapshot) {
     const mentionsCpu = /cpu|fan|noise|heat|warm|freez|freeze|slow|spin/i.test(lowerMsg);
@@ -328,7 +416,7 @@ export function buildDeductiveTriage(request: DeductiveTriageRequest): Deductive
     const cpuIsElevated = hasCpuSnapshot && (snapshot.cpuPercent ?? 0) >= 70;
     const dnsFailed = snapshot.dnsResolved === false;
     const diskLow = snapshot.diskFreeGb !== null && snapshot.diskFreeGb < 10;
-    const memHigh = snapshot.memoryTotalMb && snapshot.memoryUsedMb && (snapshot.memoryUsedMb / snapshot.memoryTotalMb) > 0.85;
+    const memHigh = Boolean(snapshot.memoryTotalMb && snapshot.memoryUsedMb && (snapshot.memoryUsedMb / snapshot.memoryTotalMb) > 0.85);
 
     let addressedSymptomMismatch = false;
     let reply = '';
@@ -360,6 +448,12 @@ export function buildDeductiveTriage(request: DeductiveTriageRequest): Deductive
       const procInfo = topProc ? ` Top consumer: \`${topProc.name}\` (${topProc.cpuPercent !== null ? topProc.cpuPercent + '%' : 'sampled'}).` : '';
       reply = `Your active telemetry snapshot confirms elevated CPU utilization at **${snapshot.cpuPercent}%**.${procInfo} Would you like to review non-elevated remediation options or isolate background tasks?`;
       updatedHypotheses.push({ id: 'hyp-cpu', domain: 'cpu_thermal', summary: 'High CPU utilization confirmed by telemetry', confidence: 0.95, status: 'confirmed' });
+    } else if (memHigh) {
+      const memPct = Math.round(((snapshot.memoryUsedMb || 0) / (snapshot.memoryTotalMb || 1)) * 100);
+      const usedGb = ((snapshot.memoryUsedMb || 0) / 1024).toFixed(1);
+      const totalGb = ((snapshot.memoryTotalMb || 1) / 1024).toFixed(1);
+      reply = `Your active telemetry snapshot confirms high memory utilization at **${memPct}%** (${usedGb} / ${totalGb} GB). This frequently triggers page thrashing. Would you like to inspect top memory-consuming processes or discard background browser tabs?`;
+      updatedHypotheses.push({ id: 'hyp-mem', domain: 'memory', summary: 'High physical memory pressure confirmed by telemetry', confidence: 0.9, status: 'confirmed' });
     } else {
       reply = `Based on your active telemetry snapshot, memory is at ${snapshot.memoryUsedMb ? Math.round(((snapshot.memoryUsedMb) / (snapshot.memoryTotalMb || 1)) * 100) + '%' : 'normal'} and network status is ${snapshot.dnsResolved === false ? 'Degraded (DNS failing)' : 'Healthy'}. What specific behavior would you like to drill into next?`;
       updatedHypotheses.push({ id: 'hyp-gen', domain: 'application', summary: 'System telemetry under review', confidence: 0.7, status: 'active' });
@@ -375,7 +469,7 @@ export function buildDeductiveTriage(request: DeductiveTriageRequest): Deductive
         'Export offline report',
       ],
       hypotheses: updatedHypotheses,
-      recommendedAction: cpuIsElevated || dnsFailed || diskLow ? 'propose_remediation' : 'ask_clarifying_question',
+      recommendedAction: cpuIsElevated || dnsFailed || diskLow || memHigh ? 'propose_remediation' : 'ask_clarifying_question',
       addressedSymptomMismatch,
     };
   }
@@ -398,8 +492,17 @@ export function buildDeductiveTriage(request: DeductiveTriageRequest): Deductive
     };
   }
 
-  // 4. Deep OS Collector Request
-  if (lowerMsg.includes('system check') || lowerMsg.includes('os collector') || lowerMsg.includes('run deep') || lowerMsg.includes('powershell') || lowerMsg.includes('terminal')) {
+  // 4. Deep OS Collector Request (explicit user requests only)
+  const isExplicitCollectorRequest =
+    lowerMsg === 'run read-only system check' ||
+    lowerMsg === 'run deep system check' ||
+    lowerMsg === 'run system check' ||
+    lowerMsg === 'still happening — run deep system check' ||
+    lowerMsg === 'authorize & start investigation' ||
+    lowerMsg === 'skip to os collector' ||
+    /^(please\s+)?(run|start)\s+(the\s+)?(deep\s+|read-only\s+)?system\s+check$/i.test(lowerMsg);
+
+  if (isExplicitCollectorRequest) {
     return {
       stage: 'awaiting_authorization',
       reply: 'To capture live OS-level processor, disk, and socket telemetry, please select your workstation platform and authorize the read-only inspection collector.',
@@ -495,6 +598,26 @@ export function buildDeductiveTriage(request: DeductiveTriageRequest): Deductive
         { id: 'hyp-disk', domain: 'disk_io', summary: 'Exhausted system drive or temporary file accumulation', confidence: 0.8, status: 'active' },
         { id: 'hyp-app', domain: 'application', summary: 'Unbounded application cache growth', confidence: 0.5, status: 'active' },
         { id: 'hyp-net', domain: 'network_dns', summary: 'Network connection failure', confidence: 0.1, status: 'ruled_out' },
+      ],
+      recommendedAction: 'ask_clarifying_question',
+      addressedSymptomMismatch: false,
+    };
+  }
+
+  // Memory / RAM pressure
+  if (/memory|ram\b|working set|paging|swap/i.test(lowerMsg)) {
+    return {
+      stage: 'deductive_questioning',
+      reply: 'High memory usage (RAM pressure) can cause Windows and macOS to thrash disk paging files, leading to unresponsive windows. To isolate this: are you running multiple memory-intensive applications (such as many browser tabs or IDEs), or does memory stay high even with all desktop apps closed?',
+      quickReplies: [
+        'Many open browser tabs',
+        'Specific heavy desktop app',
+        'High even with apps closed',
+        'Run instant browser check',
+      ],
+      hypotheses: [
+        { id: 'hyp-mem', domain: 'memory', summary: 'Application working set exhaustion or memory leak', confidence: 0.85, status: 'active' },
+        { id: 'hyp-app', domain: 'application', summary: 'Browser renderer process contention', confidence: 0.75, status: 'active' },
       ],
       recommendedAction: 'ask_clarifying_question',
       addressedSymptomMismatch: false,
@@ -754,13 +877,22 @@ const RELAY_TRIAGE_SYSTEM_PROMPT = `You are Relay Assistant, an expert enterpris
 Your goal is to help users troubleshoot and resolve workstation, operating system, application, browser, and network problems across Windows 11, macOS, and Ubuntu Linux.
 
 CRITICAL OPERATIONAL RULES:
-1. Zero-Install Resolution First: Whenever possible, provide immediate, non-invasive troubleshooting steps (e.g. browser settings, clearing site-specific cache/permissions, resetting adapters, inspecting Task Manager) before suggesting collector scripts.
-2. Socratic & Deductive: If the problem is broad or ambiguous, ask ONE focused clarifying question to isolate the fault domain.
-3. Never Hallucinate Symptoms: NEVER assume symptoms the user did not state. If the user says "my computer is slow", do NOT assume fan noise or overheating unless they mentioned it.
-4. Direct Technical Answers: If the user asks a specific question (e.g. "A web portal is failing to load properly; I need help clearing localized browser cache and permissions"), answer that question directly, accurately, and with step-by-step instructions for major browsers (Chrome/Edge/Safari/Firefox).
-5. Grounded in Telemetry: When an active Telemetry Snapshot or Browser WebAPI probe is present in the context, cite the exact numbers (e.g. CPU %, memory used, storage free, ping, GPU renderer).
-6. Safety Boundary: NEVER output raw executable code blocks that pipe curl/irm into bash/powershell, elevation commands (sudo/RunAs), or destructive scripts.
-7. Output JSON: You MUST respond strictly in valid JSON matching this schema:
+1. Automatic Telemetry & Process Synthesis:
+   - When "Browser WebAPI Diagnostic" is present in context: Always incorporate it. If in-browser metrics are normal/healthy and the user reports sluggishness, explicitly note that the browser layer is performing normally and the issue lies in OS-level resource contention.
+   - When "Active Telemetry Snapshot" and "Captured Top OS Processes" are present in context: You ALREADY have the ground-truth system resource metrics and running processes. NEVER ask the user to run Task Manager, PowerShell commands (like Get-Process | Sort-Object ...), or terminal scripts to find what is consuming CPU or memory.
+   - Directly analyze the specific processes provided in "Captured Top OS Processes" (e.g. Chrome tabs, vmmemWSL/docker, Electron apps, system services) and explain which ones are driving resource consumption.
+2. Concrete Actionable Next Steps:
+   - Provide concrete, prioritized, non-elevated resolution steps tailored to the top processes:
+     * High browser memory: recommend managing or discarding inactive tabs via chrome://discards or edge://discards, or enabling Memory Saver under Settings > Performance.
+     * High WSL / Docker memory: recommend limiting memory in ~/.wslconfig or executing \`wsl --shutdown\` to reclaim memory.
+     * Unresponsive user apps: explain the proposed non-elevated remediation action or recommend closing the app.
+   - Never generate elevation commands (sudo, RunAs) or destructive force-kills.
+3. Zero-Install Resolution First: Whenever possible, provide immediate, non-invasive troubleshooting steps before suggesting collector scripts.
+4. Socratic & Deductive when Unmeasured: If telemetry is NOT yet collected and the issue is ambiguous, ask ONE focused clarifying question or propose running the zero-install browser check or read-only OS inspection.
+5. Direct Technical Answers: If the user asks a specific question, answer that question directly, accurately, and with step-by-step instructions.
+6. Terminal Output & Feedback: If the user pastes terminal output or reports that a script skipped or PID was not found, acknowledge the output, explain why it occurred (e.g. process already exited or session boundary), and provide non-elevated next steps. Never reset back to the authorization card.
+7. Never Target PID 0: Windows PID 0 is the System Idle Process and cannot be managed or closed.
+8. Output JSON: You MUST respond strictly in valid JSON matching this schema:
 {
   "stage": "intake_discovery" | "deductive_questioning" | "browser_probe" | "awaiting_authorization" | "awaiting_telemetry" | "active_investigation",
   "reply": "Your markdown-formatted message to the user.",
@@ -778,45 +910,150 @@ CRITICAL OPERATIONAL RULES:
   "addressedSymptomMismatch": false
 }`;
 
-async function callGeminiTriage(
-  request: DeductiveTriageRequest,
-  apiKey: string,
-  model: string = 'gemini-2.0-flash',
-  timeoutMs: number = 15000,
-): Promise<ValidationResult<DeductiveTriageResponse>> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+export interface GeminiContentTurn {
+  role: 'user' | 'model';
+  parts: Array<{ text: string }>;
+}
 
-  const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
+/**
+ * Builds compliant multi-turn contents for the Google Gemini generateContent API.
+ * Guarantees strict user/model turn alternation, merges consecutive same-role messages,
+ * strips leading assistant messages, and injects context prefix onto the initial user prompt.
+ */
+export function buildGeminiContents(
+  history: Array<{ sender: 'user' | 'assistant'; text: string }>,
+  currentMessage: string,
+  contextPrefix: string = '',
+): GeminiContentTurn[] {
+  const rawList: Array<{ role: 'user' | 'model'; text: string }> = [];
 
-  const contextParts: string[] = [`Workstation Platform: ${request.platform}`];
-  if (request.snapshot) {
-    contextParts.push(
-      `Active Telemetry: CPU ${request.snapshot.cpuPercent ?? 'null'}%, Memory ${request.snapshot.memoryUsedMb ?? 'null'}/${request.snapshot.memoryTotalMb ?? 'null'} MB, Disk Free ${request.snapshot.diskFreeGb ?? 'null'} GB, DNS ${request.snapshot.dnsResolved ?? 'null'}, Gateway Ping ${request.snapshot.gatewayLatencyMs ?? 'null'} ms`,
-    );
+  for (const item of history || []) {
+    const text = item.text?.trim();
+    if (!text) continue;
+    rawList.push({
+      role: item.sender === 'user' ? 'user' : 'model',
+      text,
+    });
   }
-  if (request.findings && request.findings.length > 0) {
-    contextParts.push(`Findings: ${request.findings.map((f) => f.observation).join('; ')}`);
-  }
-  const contextPrefix = `[Context: ${contextParts.join(' | ')}]`;
 
-  if (request.conversationHistory && request.conversationHistory.length > 0) {
-    for (const msg of request.conversationHistory) {
+  const currentTrimmed = currentMessage.trim();
+  if (currentTrimmed) {
+    rawList.push({ role: 'user', text: currentTrimmed });
+  }
+
+  // Gemini strictly requires the multi-turn exchange to start with 'user'
+  while (rawList.length > 0 && rawList[0].role !== 'user') {
+    rawList.shift();
+  }
+
+  if (rawList.length === 0) {
+    return [{ role: 'user', parts: [{ text: contextPrefix ? `${contextPrefix}\n\nHello` : 'Hello' }] }];
+  }
+
+  // Prepend context metadata to the first user turn
+  if (contextPrefix) {
+    rawList[0].text = `${contextPrefix}\n\n${rawList[0].text}`;
+  }
+
+  // Strictly alternate roles: merge consecutive messages with the same role
+  const contents: GeminiContentTurn[] = [];
+  for (const item of rawList) {
+    const last = contents[contents.length - 1];
+    if (last && last.role === item.role) {
+      last.parts.push({ text: item.text });
+    } else {
       contents.push({
-        role: msg.sender === 'user' ? 'user' : 'model',
-        parts: [{ text: msg.text }],
+        role: item.role,
+        parts: [{ text: item.text }],
       });
     }
   }
 
-  if (contents.length > 0 && contents[0].role === 'model') {
-    contents.shift();
+  // Ensure conversation ends on user turn
+  if (contents.length > 0 && contents[contents.length - 1].role !== 'user') {
+    contents.push({ role: 'user', parts: [{ text: currentTrimmed || 'Please advise on next steps.' }] });
   }
 
-  const userText = contents.length === 0 ? `${contextPrefix}\n\n${request.userMessage}` : request.userMessage;
-  contents.push({ role: 'user', parts: [{ text: userText }] });
+  return contents;
+}
+
+export function buildTriageContextPrefix(request: DeductiveTriageRequest): string {
+  const contextParts: string[] = [`Workstation Platform: ${request.platform}`];
+
+  if (request.browserProbe) {
+    const bp = request.browserProbe;
+    contextParts.push(
+      `Browser WebAPI Diagnostic: Platform ${bp.platform || request.platform}, Logical Cores: ${bp.hardwareConcurrency ?? 'unknown'}, Estimated Memory: ${bp.deviceMemoryGb ? bp.deviceMemoryGb + ' GB' : 'unrestricted'}, Network: ${bp.networkOnline ? 'Online' : 'Offline'} (${bp.apiPingMs !== null && bp.apiPingMs !== undefined ? bp.apiPingMs + ' ms ping' : 'ping unmeasured'}), GPU: "${bp.gpuRenderer || 'Default'}", Result: ${bp.isHealthy ? 'All In-Browser Metrics Normal & Healthy' : 'Browser Constraints Detected'}`,
+    );
+  }
+
+  if (request.snapshot) {
+    const s = request.snapshot;
+    const memPct =
+      s.memoryTotalMb && s.memoryUsedMb
+        ? Math.round((s.memoryUsedMb / s.memoryTotalMb) * 100)
+        : null;
+    const memStr =
+      s.memoryUsedMb !== null && s.memoryTotalMb !== null
+        ? `${s.memoryUsedMb}/${s.memoryTotalMb} MB${memPct !== null ? ` (${memPct}%)` : ''}`
+        : 'null';
+    contextParts.push(
+      `Active Telemetry Snapshot: CPU ${s.cpuPercent ?? 'null'}%, Memory ${memStr}, Disk Free ${s.diskFreeGb ?? 'null'} GB, DNS ${s.dnsResolved ?? 'null'}, Gateway Ping ${s.gatewayLatencyMs ?? 'null'} ms`,
+    );
+
+    if (s.processes && s.processes.length > 0) {
+      const topProcs = s.processes
+        .slice(0, 10)
+        .map((p) => {
+          const memVal = p.memoryMb !== null && p.memoryMb !== undefined ? `${p.memoryMb} MB` : '';
+          const cpuVal = p.cpuPercent !== null && p.cpuPercent !== undefined ? `${p.cpuPercent}% CPU` : '';
+          const stats = [memVal, cpuVal].filter(Boolean).join(', ');
+          return `${p.name} (PID ${p.pid}${stats ? ': ' + stats : ''})`;
+        })
+        .join(', ');
+      contextParts.push(`Captured Top OS Processes: ${topProcs}`);
+    }
+  }
+
+  if (request.remediation) {
+    contextParts.push(
+      `Proposed Remediation: Action "${request.remediation.actionId}"${request.remediation.targetProcess ? ' for process ' + request.remediation.targetProcess : ''}${request.remediation.targetPid ? ' (PID ' + request.remediation.targetPid + ')' : ''} [Zero Elevation Required]`,
+    );
+  }
+
+  if (request.findings && request.findings.length > 0) {
+    contextParts.push(`Telemetry Findings: ${request.findings.map((f) => `${f.id} (${f.observation})`).join('; ')}`);
+  }
+
+  return `[Context: ${contextParts.join(' | ')}]`;
+}
+
+async function callGeminiTriage(
+  request: DeductiveTriageRequest,
+  apiKey: string,
+  model: string = 'gemini-2.5-flash',
+  timeoutMs: number = 15000,
+): Promise<ValidationResult<DeductiveTriageResponse>> {
+  // Gracefully remap deprecated gemini-2.0-flash to gemini-2.5-flash
+  const activeModel = model === 'gemini-2.0-flash' ? 'gemini-2.5-flash' : model;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(activeModel)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  // Retrieve relevant IT runbooks via RAG engine
+  const scoredRunbooks = retrieveRunbooks(request.userMessage, {
+    platform: request.platform,
+    findings: request.findings,
+  });
+  const ragContext = buildRagPromptContext(scoredRunbooks, request.platform);
+  const contextPrefix = buildTriageContextPrefix(request);
+
+  const contents = buildGeminiContents(
+    request.conversationHistory || [],
+    request.userMessage,
+    contextPrefix,
+  );
 
   const payload = {
-    system_instruction: { parts: [{ text: RELAY_TRIAGE_SYSTEM_PROMPT }] },
+    system_instruction: { parts: [{ text: RELAY_TRIAGE_SYSTEM_PROMPT + ragContext }] },
     contents,
     generationConfig: {
       temperature: 0.2,
@@ -833,7 +1070,8 @@ async function callGeminiTriage(
 
   if (!response.ok) {
     const errText = await response.text();
-    return { ok: false, error: `Gemini API error (${response.status}): ${errText.slice(0, 200)}` };
+    console.error(`[Relay Gemini API Error] HTTP ${response.status}:`, errText);
+    return { ok: false, error: `Gemini API error (${response.status}): ${errText.slice(0, 300)}` };
   }
 
   interface GeminiCandidate {
@@ -870,8 +1108,15 @@ async function callOpenAITriage(
 ): Promise<ValidationResult<DeductiveTriageResponse>> {
   const url = 'https://api.openai.com/v1/chat/completions';
 
+  // Retrieve relevant IT runbooks via RAG engine
+  const scoredRunbooks = retrieveRunbooks(request.userMessage, {
+    platform: request.platform,
+    findings: request.findings,
+  });
+  const ragContext = buildRagPromptContext(scoredRunbooks, request.platform);
+
   const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-    { role: 'system', content: RELAY_TRIAGE_SYSTEM_PROMPT },
+    { role: 'system', content: RELAY_TRIAGE_SYSTEM_PROMPT + ragContext },
   ];
 
   if (request.conversationHistory && request.conversationHistory.length > 0) {
@@ -880,13 +1125,8 @@ async function callOpenAITriage(
     }
   }
 
-  const contextParts: string[] = [`Workstation Platform: ${request.platform}`];
-  if (request.snapshot) {
-    contextParts.push(
-      `Active Telemetry: CPU ${request.snapshot.cpuPercent ?? 'null'}%, Memory ${request.snapshot.memoryUsedMb ?? 'null'}/${request.snapshot.memoryTotalMb ?? 'null'} MB, Disk Free ${request.snapshot.diskFreeGb ?? 'null'} GB, DNS ${request.snapshot.dnsResolved ?? 'null'}`,
-    );
-  }
-  const currentPrompt = `[Context: ${contextParts.join(' | ')}]\n\n${request.userMessage}`;
+  const contextPrefix = buildTriageContextPrefix(request);
+  const currentPrompt = `${contextPrefix}\n\n${request.userMessage}`;
   messages.push({ role: 'user', content: currentPrompt });
 
   const response = await fetch(url, {
@@ -932,6 +1172,59 @@ async function callOpenAITriage(
   }
 }
 
+
+/**
+ * Circuit breaker state (module-level, per-isolate).
+ * Protects against cascading AI provider failures.
+ * Resets on cold start — acceptable for per-isolate in-memory protection.
+ */
+const _breaker = {
+  failures: 0,
+  openUntil: 0,
+  state: 'CLOSED' as 'CLOSED' | 'OPEN' | 'HALF_OPEN',
+};
+const BREAKER_FAILURE_THRESHOLD = 3;
+const BREAKER_OPEN_DURATION_MS = 60_000;
+const BREAKER_CALL_TIMEOUT_MS = 8_000;
+
+function _breakerSuccess(): void {
+  _breaker.failures = 0;
+  _breaker.openUntil = 0;
+  _breaker.state = 'CLOSED';
+}
+function _breakerFailure(): void {
+  _breaker.failures += 1;
+  if (_breaker.failures >= BREAKER_FAILURE_THRESHOLD) {
+    _breaker.state = 'OPEN';
+    _breaker.openUntil = Date.now() + BREAKER_OPEN_DURATION_MS;
+  }
+}
+function _breakerAllowsCall(): boolean {
+  if (_breaker.state === 'CLOSED') return true;
+  if (_breaker.state === 'OPEN') {
+    if (Date.now() >= _breaker.openUntil) {
+      _breaker.state = 'HALF_OPEN';
+      return true;
+    }
+    return false;
+  }
+  return true;
+}
+async function _withRetry(
+  fn: () => Promise<ValidationResult<DeductiveTriageResponse>>,
+): Promise<ValidationResult<DeductiveTriageResponse>> {
+  const result = await fn();
+  if (!result.ok) {
+    const err = (result as { ok: false; error: string }).error;
+    if (/429|503/.test(err)) {
+      const jitter = 100 + Math.floor(Math.random() * 300);
+      await new Promise<void>((r) => setTimeout(r, jitter));
+      return fn();
+    }
+  }
+  return result;
+}
+
 /**
  * Executes a deductive triage step through the AI provider adapter.
  */
@@ -946,41 +1239,68 @@ export async function executeDeductiveTriage(
       ? process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY
       : process.env.OPENAI_API_KEY || process.env.NEXT_PUBLIC_OPENAI_API_KEY) ||
     '';
+  const requestedModel =
+    config?.model || (provider === 'gemini' ? 'gemini-2.5-flash' : 'gpt-4o-mini');
   const model =
-    config?.model || (provider === 'gemini' ? 'gemini-2.0-flash' : 'gpt-4o-mini');
+    provider === 'gemini' && requestedModel === 'gemini-2.0-flash'
+      ? 'gemini-2.5-flash'
+      : requestedModel;
 
-  if (apiKey) {
+  let fallbackReason: string | undefined = undefined;
+
+  // Circuit breaker gate: bypass live AI when breaker is OPEN
+  if (apiKey && _breakerAllowsCall()) {
     try {
+      const timeoutMs = config?.timeoutMs ?? BREAKER_CALL_TIMEOUT_MS;
+
       if (provider === 'gemini') {
-        const geminiRes = await callGeminiTriage(request, apiKey, model, config?.timeoutMs);
+        const geminiRes = await _withRetry(() => callGeminiTriage(request, apiKey, model, timeoutMs));
         if (geminiRes.ok) {
+          _breakerSuccess();
           return {
             ...geminiRes.value,
             isFallback: false,
             providerUsed: 'gemini',
             modelUsed: model,
           };
+        } else {
+          const errMsg = (geminiRes as { ok: false; error: string }).error;
+          fallbackReason = errMsg;
+          _breakerFailure();
+          console.warn('[Relay AI] Gemini call returned error:', errMsg);
         }
       } else if (provider === 'openai') {
-        const openaiRes = await callOpenAITriage(request, apiKey, model, config?.timeoutMs);
+        const openaiRes = await _withRetry(() => callOpenAITriage(request, apiKey, model, timeoutMs));
         if (openaiRes.ok) {
+          _breakerSuccess();
           return {
             ...openaiRes.value,
             isFallback: false,
             providerUsed: 'openai',
             modelUsed: model,
           };
+        } else {
+          const errMsg = (openaiRes as { ok: false; error: string }).error;
+          fallbackReason = errMsg;
+          _breakerFailure();
+          console.warn('[Relay AI] OpenAI call returned error:', errMsg);
         }
       }
-    } catch {
-      // Fall through to deterministic fallback
+    } catch (err) {
+      fallbackReason = String(err);
+      _breakerFailure();
+      console.warn('[Relay AI] Exception calling provider:', err);
     }
+  } else if (apiKey && !_breakerAllowsCall()) {
+    fallbackReason = 'Circuit breaker OPEN — AI provider temporarily unavailable.';
+    console.warn('[Relay AI]', fallbackReason);
   }
 
   const fallback = buildDeductiveTriage(request);
   return {
     ...fallback,
     isFallback: true,
+    fallbackReason,
     providerUsed: 'deterministic-rules-engine',
     modelUsed: 'offline-rules',
   };

@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
-import { createRequestBatch } from '../lib/idempotent-create';
+import { createRequestBatch, pruneExpiredReservations } from '../lib/idempotent-create';
 
 const sqlBuilder = drizzle({} as never, { schema });
 const timestamp = '2026-10-15T12:00:00.000Z';
@@ -78,3 +78,26 @@ test('production SQL preserves the winning case and deletion tombstone across la
     assert.equal(db.prepare('SELECT user_id FROM support_cases').get()!.user_id, 'synthetic-other');
   } finally { db.close(); }
 });
+
+test('pruneExpiredReservations deletes stale reservations while preserving fresh ones', async () => {
+  const db = database();
+  try {
+    const staleTime = new Date(Date.now() - 300_000).toISOString();
+    const freshTime = new Date().toISOString();
+
+    db.prepare('INSERT INTO case_create_requests (owner_id, key_hash, payload_hash, case_id, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run('owner-1', '1'.repeat(64), 'p1'.padEnd(64, '0'), 'case-stale', staleTime);
+    db.prepare('INSERT INTO case_create_requests (owner_id, key_hash, payload_hash, case_id, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run('owner-2', '2'.repeat(64), 'p2'.padEnd(64, '0'), 'case-fresh', freshTime);
+
+    assert.equal(count(db, 'case_create_requests'), 2);
+
+    const pruned = await pruneExpiredReservations(db, 120_000);
+    assert.equal(pruned, 1, 'Should prune exactly 1 stale reservation');
+    assert.equal(count(db, 'case_create_requests'), 1, 'Fresh reservation should remain');
+
+    const remaining = db.prepare('SELECT case_id FROM case_create_requests').get() as { case_id: string };
+    assert.equal(remaining.case_id, 'case-fresh');
+  } finally { db.close(); }
+});
+

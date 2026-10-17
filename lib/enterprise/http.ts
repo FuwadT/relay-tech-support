@@ -4,17 +4,18 @@ export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}
 export class EnterpriseHttpError extends Error {
   constructor(public readonly status: number, message: string) { super(message); }
 }
-export function json(value: unknown, status = 200): Response {
+export function json(value: unknown, status = 200, customHeaders: Record<string, string> = {}): Response {
   return Response.json(value, { status, headers: {
     'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
     'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'",
+    ...customHeaders,
   } });
 }
-export async function boundedJson(request: Request): Promise<unknown> {
+export async function boundedJson(request: Request, maxBytes = 16_384): Promise<unknown> {
   if (!/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(request.headers.get('content-type') ?? '')) {
     throw new EnterpriseHttpError(415, 'Send application/json.');
   }
-  const maximum = 16_384;
+  const maximum = maxBytes;
   if (Number(request.headers.get('content-length')) > maximum) throw new EnterpriseHttpError(413, 'Request is too large.');
   const reader = request.body?.getReader();
   if (!reader) throw new EnterpriseHttpError(400, 'A JSON body is required.');

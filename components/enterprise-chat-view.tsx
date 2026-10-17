@@ -39,23 +39,22 @@ import type {
 } from '@/lib/enterprise/contracts';
 import {
   analyzeEnterpriseTelemetry,
-  formatCpuUsage,
-  formatMemoryUsage,
-  formatDiskFree,
   generateSymptomAwareExplanation,
   explainTelemetryQuestion,
 } from '@/lib/enterprise/findings';
 import { buildEnterpriseReportHtml } from '@/lib/enterprise/diagnostic-report';
 import { getCatalogAction } from '@/lib/enterprise/remediation-catalog';
 import { validateTelemetrySnapshot } from '@/lib/enterprise/telemetry-validation';
-import {
-  getCollectorScript,
-  getCollectorTerminalSnippet,
-} from '@/lib/enterprise/collector-scripts';
+import { getCollectorScript } from '@/lib/enterprise/collector-scripts';
 import {
   runBrowserDiagnosticProbe,
   analyzeBrowserProbe,
 } from '@/lib/browser-probe';
+import { detectClientPlatform } from '@/lib/formatters';
+import { FormattedMessage } from '@/components/ui/formatted-text';
+import { TelemetryFindingsCard } from '@/components/diagnostics/telemetry-findings-card';
+import { CollectorInstructionsCard } from '@/components/diagnostics/collector-instructions-card';
+import { TriageQuickReplies } from '@/components/diagnostics/triage-quick-replies';
 
 export type TriageStage =
   | 'intake_discovery'       // Initial greeting: "What seems to be the issue you are having?"
@@ -86,55 +85,6 @@ interface ChatMessage {
   remediation?: RemediationProposal;
 }
 
-/** Detects the client workstation operating system from browser user agent. */
-export function detectClientPlatform(): DevicePlatform {
-  if (typeof navigator === 'undefined') return 'windows';
-  const ua = navigator.userAgent.toLowerCase();
-  if (ua.includes('win')) return 'windows';
-  if (ua.includes('mac')) return 'macos';
-  if (ua.includes('linux') || ua.includes('ubuntu')) return 'ubuntu';
-  return 'windows';
-}
-
-/** Renders inline Markdown (**bold** and `code`) safely without dangerouslySetInnerHTML. */
-export function renderFormattedMessage(text: string): React.ReactNode {
-  const lines = text.split('\n');
-  return lines.map((line, lineIndex) => {
-    const parts = line.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
-    return (
-      <React.Fragment key={lineIndex}>
-        {lineIndex > 0 && <br />}
-        {parts.map((part, partIndex) => {
-          if (part.startsWith('**') && part.endsWith('**') && part.length >= 4) {
-            return (
-              <strong key={partIndex} style={{ fontWeight: 600, color: '#242424' }}>
-                {part.slice(2, -2)}
-              </strong>
-            );
-          }
-          if (part.startsWith('`') && part.endsWith('`') && part.length >= 2) {
-            return (
-              <code
-                key={partIndex}
-                style={{
-                  padding: '2px 5px',
-                  borderRadius: '3px',
-                  background: '#ecebe8',
-                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                  fontSize: '12px',
-                  color: '#343330',
-                }}
-              >
-                {part.slice(1, -1)}
-              </code>
-            );
-          }
-          return part;
-        })}
-      </React.Fragment>
-    );
-  });
-}
 
 const SYMPTOM_CHIPS = [
   { label: '🚀 High CPU & Fan Noise', prompt: 'My computer is freezing up with very high CPU utilization and loud fan noise.' },
@@ -380,6 +330,17 @@ export function EnterpriseChatView({
     typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:8790'
   );
   const [isRunningProbe, setIsRunningProbe] = useState(false);
+  const [activeBrowserProbe, setActiveBrowserProbe] = useState<{
+    platform?: string;
+    hardwareConcurrency?: number | null;
+    deviceMemoryGb?: number | null;
+    networkOnline?: boolean;
+    apiPingMs?: number | null;
+    gpuRenderer?: string | null;
+    isHealthy?: boolean;
+    storageUsageGb?: number | null;
+    storageQuotaGb?: number | null;
+  } | null>(null);
 
   // AI Provider Integration State
   const [aiProvider, setAiProvider] = useState<'gemini' | 'openai'>(() => {
@@ -396,9 +357,14 @@ export function EnterpriseChatView({
   });
   const [aiModel, setAiModel] = useState<string>(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('relay_ai_model') || 'gemini-2.0-flash';
+      const stored = localStorage.getItem('relay_ai_model');
+      if (stored && stored !== 'gemini-2.0-flash') {
+        return stored;
+      }
+      localStorage.setItem('relay_ai_model', 'gemini-2.5-flash');
+      return 'gemini-2.5-flash';
     }
-    return 'gemini-2.0-flash';
+    return 'gemini-2.5-flash';
   });
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -438,6 +404,19 @@ export function EnterpriseChatView({
       );
       const analysis = analyzeBrowserProbe(result);
 
+      const probeSummary = {
+        platform: result.platform,
+        hardwareConcurrency: result.hardwareConcurrency,
+        deviceMemoryGb: result.deviceMemoryGb,
+        networkOnline: result.network.online,
+        apiPingMs: result.timing.apiPingMs,
+        gpuRenderer: result.gpuRenderer,
+        isHealthy: analysis.isHealthy,
+        storageUsageGb: result.storage.usageGb,
+        storageQuotaGb: result.storage.quotaGb,
+      };
+      setActiveBrowserProbe(probeSummary);
+
       const probeDetails = [
         `• **Platform**: ${result.platform} (${result.hardwareConcurrency ? result.hardwareConcurrency + ' logical cores' : 'cores unmeasured'})`,
         `• **Memory**: ${result.deviceMemoryGb ? result.deviceMemoryGb + ' GB estimated' : 'unrestricted'}`,
@@ -465,13 +444,29 @@ export function EnterpriseChatView({
           text: responseText,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
+        ...(analysis.isHealthy
+          ? [
+              {
+                id: crypto.randomUUID(),
+                sender: 'assistant' as const,
+                text: 'Because core in-browser metrics and GPU acceleration are healthy, the slowdown is isolated to the operating system level. Let’s proceed to a non-elevated read-only diagnostic inspection to measure live CPU, memory, and running processes:',
+                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                cardType: 'device-auth' as const,
+              },
+            ]
+          : []),
       ]);
 
-      setPendingQuickReplies([
-        'Solved my issue',
-        'Still happening — run deep system check',
-      ]);
-      setStage('deductive_questioning');
+      if (analysis.isHealthy) {
+        setPendingQuickReplies(['Authorize & Start Investigation', 'Show manual troubleshooting steps']);
+        setStage('awaiting_authorization');
+      } else {
+        setPendingQuickReplies([
+          'Solved my issue',
+          'Still happening — run deep system check',
+        ]);
+        setStage('deductive_questioning');
+      }
     } catch {
       setMessages((prev) => [
         ...prev,
@@ -512,24 +507,77 @@ export function EnterpriseChatView({
     const findings = analyzeEnterpriseTelemetry(snapshot);
     setActiveFindings(findings);
 
-    // Catalog remediation proposal matching
+    // Catalog remediation proposal matching based on evidence findings
     let remediation: RemediationProposal | null = null;
-    if (findings.length > 0) {
-      const topAction = getCatalogAction(
-        snapshot.platform === 'windows' ? 'win-proc-graceful-request' : 'mac-proc-graceful-term',
-        snapshot.platform
-      );
-      if (topAction) {
+    const hasDnsFinding = findings.some((f) => f.id === 'dns-unsuccessful');
+    const hasDiskFinding = findings.some((f) => f.id === 'disk-free-low');
+    const hasCpuFinding = findings.some((f) => f.id === 'cpu-high');
+    const hasMemoryFinding = findings.some((f) => f.id === 'memory-high');
+
+    const systemNames = new Set([
+      'system', 'system idle process', 'registry', 'smss.exe', 'csrss.exe',
+      'wininit.exe', 'services.exe', 'lsass.exe', 'svchost.exe', 'kernel_task',
+      'launchd', 'systemd', 'init'
+    ]);
+    const topProcess = (snapshot.processes || []).find(
+      (p) => typeof p.pid === 'number' && p.pid > 4 && p.name && !systemNames.has(p.name.toLowerCase())
+    );
+
+    if (hasDnsFinding) {
+      const actionId = snapshot.platform === 'windows'
+        ? 'win-net-flush-dns-cache'
+        : snapshot.platform === 'macos'
+          ? 'mac-net-flush-dns'
+          : 'ubuntu-net-flush-resolve-cache';
+      const action = getCatalogAction(actionId, snapshot.platform);
+      if (action) {
         remediation = {
           id: crypto.randomUUID(),
-          catalogActionId: topAction.id,
-          catalogVersion: topAction.version,
+          catalogActionId: action.id,
+          catalogVersion: action.version,
           platform: snapshot.platform,
-          evidenceIds: findings.map((f) => f.id),
-          parameters: { targetProcess: snapshot.processes?.[0]?.name || 'system' },
-          consequences: topAction.consequences,
-          rollbackInstructions: topAction.rollbackInstructions,
-          followUpCheckIds: topAction.followUpCheckIds,
+          evidenceIds: findings.filter((f) => f.id === 'dns-unsuccessful').map((f) => f.id),
+          parameters: {},
+          consequences: action.consequences,
+          rollbackInstructions: action.rollbackInstructions,
+          followUpCheckIds: action.followUpCheckIds,
+          requiresElevation: false,
+        };
+      }
+    } else if (hasDiskFinding && snapshot.platform === 'windows') {
+      const action = getCatalogAction('win-disk-clean-user-temp', 'windows');
+      if (action) {
+        remediation = {
+          id: crypto.randomUUID(),
+          catalogActionId: action.id,
+          catalogVersion: action.version,
+          platform: 'windows',
+          evidenceIds: findings.filter((f) => f.id === 'disk-free-low').map((f) => f.id),
+          parameters: { daysOld: 7 },
+          consequences: action.consequences,
+          rollbackInstructions: action.rollbackInstructions,
+          followUpCheckIds: action.followUpCheckIds,
+          requiresElevation: false,
+        };
+      }
+    } else if ((hasCpuFinding || hasMemoryFinding) && topProcess && typeof topProcess.pid === 'number' && topProcess.pid > 4) {
+      const actionId = snapshot.platform === 'windows'
+        ? 'win-proc-graceful-request'
+        : snapshot.platform === 'macos'
+          ? 'mac-proc-graceful-term'
+          : 'ubuntu-proc-graceful-term';
+      const action = getCatalogAction(actionId, snapshot.platform);
+      if (action) {
+        remediation = {
+          id: crypto.randomUUID(),
+          catalogActionId: action.id,
+          catalogVersion: action.version,
+          platform: snapshot.platform,
+          evidenceIds: findings.filter((f) => f.id === 'cpu-high' || f.id === 'memory-high').map((f) => f.id),
+          parameters: { pid: topProcess.pid, processName: topProcess.name },
+          consequences: action.consequences,
+          rollbackInstructions: action.rollbackInstructions,
+          followUpCheckIds: action.followUpCheckIds,
           requiresElevation: false,
         };
       }
@@ -551,7 +599,84 @@ export function EnterpriseChatView({
         remediation: remediation || undefined,
       },
     ]);
-  }, [reportedSymptomCategory]);
+
+    // Automatically trigger AI synthesis of telemetry findings and next steps (Zero re-prompting required)
+    setIsGenerating(true);
+    const remediationSummary = remediation
+      ? {
+          actionId: remediation.catalogActionId,
+          targetPid:
+            typeof remediation.parameters?.pid === 'number'
+              ? remediation.parameters.pid
+              : undefined,
+          targetProcess:
+            typeof remediation.parameters?.processName === 'string'
+              ? remediation.parameters.processName
+              : undefined,
+          requiresElevation: false,
+        }
+      : null;
+
+    fetch('/api/ai/triage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        stage: 'active_investigation',
+        userMessage:
+          'Telemetry snapshot captured. Synthesize an immediate technical diagnosis of the top resource consumers and prioritize actionable next steps.',
+        conversationHistory: [
+          ...messages.map((m) => ({ sender: m.sender, text: m.text })),
+          { sender: 'assistant', text: explanation },
+        ],
+        platform: selectedPlatform,
+        snapshot,
+        findings,
+        browserProbe: activeBrowserProbe,
+        remediation: remediationSummary,
+        providerConfig: {
+          provider: aiProvider,
+          apiKey: aiApiKey,
+          model: aiModel,
+        },
+      }),
+    })
+      .then(async (res) => {
+        if (!res.ok) return;
+        const json = (await res.json()) as {
+          ok?: boolean;
+          data?: {
+            reply?: string;
+            quickReplies?: string[];
+            isFallback?: boolean;
+            fallbackReason?: string;
+          };
+        };
+        if (json?.ok && json.data) {
+          let replyText = json.data.reply || '';
+          if (aiApiKey && json.data.isFallback && json.data.fallbackReason) {
+            replyText = `${replyText}\n\n> ⚠️ **${aiProvider === 'gemini' ? 'Google Gemini' : 'OpenAI'} Notice**: *${json.data.fallbackReason}*`;
+          }
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              sender: 'assistant',
+              text: replyText,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            },
+          ]);
+          if (json.data.quickReplies && json.data.quickReplies.length > 0) {
+            setPendingQuickReplies(json.data.quickReplies);
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn('[Relay AI] Auto telemetry analysis error:', err);
+      })
+      .finally(() => {
+        setIsGenerating(false);
+      });
+  }, [reportedSymptomCategory, messages, selectedPlatform, activeBrowserProbe, aiProvider, aiApiKey, aiModel]);
 
   // Background polling for direct script callback upload (Fix 4)
   useEffect(() => {
@@ -601,14 +726,47 @@ export function EnterpriseChatView({
       return;
     }
 
-    if (
-      lower.includes('run system check') ||
-      lower.includes('check now') ||
-      lower.includes('telemetry') ||
-      lower.includes('script') ||
-      lower.includes('deep check') ||
-      lower.includes('deep system check')
-    ) {
+    const trimmed = text.trim();
+
+    // If user pasted PowerShell Get-Process table, parse rows into activeSnapshot
+    let effectiveSnapshot = activeSnapshot;
+    if (trimmed.includes('Get-Process') && trimmed.includes('MemoryMB')) {
+      const matches = [...trimmed.matchAll(/(\d+)\s+([a-zA-Z0-9 ._-]+?)\s+(\d+(?:\.\d+)?)/g)];
+      if (matches.length > 0 && activeSnapshot) {
+        const parsedProcs = matches.map((m) => ({
+          pid: parseInt(m[1], 10),
+          name: m[2].trim(),
+          memoryMb: parseFloat(m[3]),
+          cpuPercent: null,
+        }));
+        effectiveSnapshot = {
+          ...activeSnapshot,
+          processes: parsedProcs,
+        };
+        setActiveSnapshot(effectiveSnapshot);
+      }
+    }
+
+    const isTerminalOutput =
+      trimmed.includes('PS C:\\') ||
+      trimmed.includes('Process not found') ||
+      trimmed.includes('Get-Process') ||
+      trimmed.includes('Telemetry copied') ||
+      trimmed.includes('[Relay]') ||
+      trimmed.length > 80;
+
+    const isExplicitSystemCheckRequest =
+      !isTerminalOutput &&
+      (lower === 'run read-only system check' ||
+        lower === 'run deep system check' ||
+        lower === 'run system check' ||
+        lower === 'still happening — run deep system check' ||
+        lower === 'authorize & start investigation' ||
+        lower === 'start deep check' ||
+        lower === 'skip to os collector' ||
+        /^(please\s+)?(run|start)\s+(the\s+)?(deep\s+|read-only\s+)?system\s+check$/i.test(lower));
+
+    if (isExplicitSystemCheckRequest) {
       setPendingQuickReplies([]);
       setStage('awaiting_authorization');
       setTimeout(() => {
@@ -629,6 +787,21 @@ export function EnterpriseChatView({
     // Call live AI Triage endpoint (/api/ai/triage)
     setIsGenerating(true);
     try {
+      const remediationSummary = activeRemediation
+        ? {
+            actionId: activeRemediation.catalogActionId,
+            targetPid:
+              typeof activeRemediation.parameters?.pid === 'number'
+                ? activeRemediation.parameters.pid
+                : undefined,
+            targetProcess:
+              typeof activeRemediation.parameters?.processName === 'string'
+                ? activeRemediation.parameters.processName
+                : undefined,
+            requiresElevation: false,
+          }
+        : null;
+
       const response = await fetch('/api/ai/triage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -637,8 +810,10 @@ export function EnterpriseChatView({
           userMessage: text,
           conversationHistory: messages.map((m) => ({ sender: m.sender, text: m.text })),
           platform: selectedPlatform,
-          snapshot: activeSnapshot,
+          snapshot: effectiveSnapshot,
           findings: activeFindings,
+          browserProbe: activeBrowserProbe,
+          remediation: remediationSummary,
           providerConfig: {
             provider: aiProvider,
             apiKey: aiApiKey,
@@ -663,6 +838,10 @@ export function EnterpriseChatView({
               status: string;
             }>;
             addressedSymptomMismatch?: boolean;
+            isFallback?: boolean;
+            fallbackReason?: string;
+            providerUsed?: string;
+            modelUsed?: string;
           };
         };
         if (json.ok && json.data) {
@@ -675,12 +854,17 @@ export function EnterpriseChatView({
               ? 'device-auth'
               : undefined;
 
+          let replyText = aiResponse.reply || '';
+          if (aiApiKey && aiResponse.isFallback && aiResponse.fallbackReason) {
+            replyText = `${replyText}\n\n> ⚠️ **${aiProvider === 'gemini' ? 'Google Gemini' : 'OpenAI'} Notice**: *${aiResponse.fallbackReason}*`;
+          }
+
           setMessages((prev) => [
             ...prev,
             {
               id: crypto.randomUUID(),
               sender: 'assistant',
-              text: aiResponse.reply,
+              text: replyText,
               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
               cardType,
             },
@@ -1029,7 +1213,7 @@ export function EnterpriseChatView({
                 <span className="timestamp">{m.timestamp}</span>
               </div>
               <div className="bubble-text">
-                {renderFormattedMessage(m.text)}
+                {<FormattedMessage text={m.text} />}
               </div>
 
               {/* Zero-Install Resolution Card */}
@@ -1246,262 +1430,48 @@ export function EnterpriseChatView({
 
               {/* Collector Instructions Card */}
               {m.cardType === 'collector' && (
-                <div className="interactive-card collector-card">
-                  <div className="card-badge">🔬 Read-Only Collector Script</div>
-                  <p className="text-sm" style={{ color: '#65635f', margin: '4px 0 10px' }}>
-                    Run the non-elevated diagnostic script on your machine to gather resource metrics, bounded process names, and redacted logs.
-                  </p>
-
-                  {/* Direct script actions */}
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '10px' }}>
-                    <button className="button secondary btn-sm" onClick={handleDownloadScript}>
-                      <ArrowDownToLine size={14} />
-                      Download Script ({scriptInfo?.filename})
-                    </button>
-                    <button className="button secondary btn-sm" onClick={handleCopyScript}>
-                      {copiedScript ? <Check size={14} style={{ color: '#166534' }} /> : <Copy size={14} />}
-                      {copiedScript ? 'Copied to clipboard!' : 'Copy raw script'}
-                    </button>
-                    <button
-                      className="button secondary btn-sm"
-                      onClick={() => setShowScriptCode(!showScriptCode)}
-                    >
-                      <Terminal size={14} />
-                      {showScriptCode ? 'Hide script preview' : 'Inspect script source'}
-                    </button>
-                  </div>
-
-                  {/* Expandable script source preview */}
-                  {showScriptCode && scriptInfo && (
-                    <div style={{ margin: '10px 0', border: '1px solid #dcdad5', borderRadius: '4px', overflow: 'hidden' }}>
-                      <div style={{ padding: '6px 10px', background: '#eeede9', fontSize: '11px', fontWeight: 600, color: '#4a4641' }}>
-                        Previewing {scriptInfo.filename} ({scriptInfo.content.split('\n').length} lines)
-                      </div>
-                      <pre style={{ margin: 0, padding: '10px', background: '#1c1b1a', color: '#f5f4f1', maxHeight: '220px', overflowY: 'auto', fontSize: '11px', lineHeight: 1.4 }}>
-                        {scriptInfo.content}
-                      </pre>
-                    </div>
-                  )}
-
-                  {/* Safe Terminal Execution Snippet (Fix 3) */}
-                  <div className="collector-code-block">
-                    <code>{getCollectorTerminalSnippet(selectedPlatform, currentOrigin)}</code>
-                  </div>
-
-                  {/* 1-Click Clipboard Paste & Ingestion (Fix 4) */}
-                  <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px solid #ede9e3' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                      <span style={{ fontSize: '12px', fontWeight: 600, color: '#38332d' }}>
-                        Ran the script in your terminal?
-                      </span>
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button
-                          className="button primary btn-sm"
-                          onClick={handleOneClickPasteClipboard}
-                          style={{ background: '#252525' }}
-                        >
-                          <ClipboardPaste size={14} />
-                          1-Click Paste from Clipboard
-                        </button>
-                        <button
-                          className="button secondary btn-sm"
-                          onClick={() => setPasteTelemetryOpen(!pasteTelemetryOpen)}
-                        >
-                          {pasteTelemetryOpen ? 'Hide Manual Input' : 'Manual Paste'}
-                        </button>
-                      </div>
-                    </div>
-
-                    {pasteTelemetryOpen && (
-                      <div style={{ marginTop: '10px' }}>
-                        <textarea
-                          rows={4}
-                          className="chat-input"
-                          style={{ width: '100%', fontFamily: 'ui-monospace, monospace', fontSize: '11px' }}
-                          placeholder='Paste the { "schemaVersion": 1, ... } JSON output here...'
-                          value={pastedTelemetryText}
-                          onChange={(e) => setPastedTelemetryText(e.target.value)}
-                        />
-                        {pasteError && (
-                          <div style={{ color: '#b91c1c', fontSize: '11px', marginTop: '4px' }}>
-                            {pasteError}
-                          </div>
-                        )}
-                        <div style={{ marginTop: '8px' }}>
-                          <button
-                            className="button primary btn-sm"
-                            onClick={handleIngestPastedTelemetry}
-                          >
-                            <Sparkles size={13} />
-                            Analyze Real Device Telemetry
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Quick Simulation Fallback */}
-                  <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px solid #ede9e3' }}>
-                    <span style={{ fontSize: '11px', color: '#76736d', display: 'block', marginBottom: '8px' }}>
-                      Or test diagnostic scenarios right now with browser-simulated fixtures:
-                    </span>
-                    <div className="card-actions">
-                      <button
-                        className="button secondary btn-sm"
-                        onClick={() => handleRunSimulation('cpu')}
-                        disabled={isSimulating}
-                      >
-                        <Cpu size={13} />
-                        {isSimulating ? 'Simulating...' : 'Simulate High CPU'}
-                      </button>
-                      <button
-                        className="button secondary btn-sm"
-                        onClick={() => handleRunSimulation('disk')}
-                        disabled={isSimulating}
-                      >
-                        <HardDrive size={13} />
-                        Simulate Low Disk
-                      </button>
-                      <button
-                        className="button secondary btn-sm"
-                        onClick={() => handleRunSimulation('dns')}
-                        disabled={isSimulating}
-                      >
-                        <Wifi size={13} />
-                        Simulate DNS Fault
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                <CollectorInstructionsCard
+                  scriptInfo={scriptInfo}
+                  selectedPlatform={selectedPlatform}
+                  currentOrigin={currentOrigin}
+                  showScriptCode={showScriptCode}
+                  onToggleShowScriptCode={() => setShowScriptCode(!showScriptCode)}
+                  copiedScript={copiedScript}
+                  onDownloadScript={handleDownloadScript}
+                  onCopyScript={handleCopyScript}
+                  onOneClickPasteClipboard={handleOneClickPasteClipboard}
+                  pasteTelemetryOpen={pasteTelemetryOpen}
+                  onTogglePasteTelemetryOpen={() => setPasteTelemetryOpen(!pasteTelemetryOpen)}
+                  pastedTelemetryText={pastedTelemetryText}
+                  onChangePastedTelemetryText={setPastedTelemetryText}
+                  pasteError={pasteError}
+                  onIngestPastedTelemetry={handleIngestPastedTelemetry}
+                  onRunSimulation={handleRunSimulation}
+                  isSimulating={isSimulating}
+                />
               )}
 
               {/* Findings & Remediation Card */}
               {m.cardType === 'findings' && m.findings && (
-                <div className="interactive-card findings-card">
-                  <div className="findings-header">
-                    <h4>Evidence-Linked Telemetry Findings</h4>
-                    <button className="button secondary btn-xs" onClick={handleDownloadReport}>
-                      <ArrowDownToLine size={13} />
-                      Export Diagnostic HTML Artifact
-                    </button>
-                  </div>
-
-                  {/* Telemetry Summary Gauges (Fix 5: Safe Formatting) */}
-                  {activeSnapshot && (
-                    <div className="gauge-grid">
-                      <div className="gauge-item">
-                        <span className="gauge-label">CPU Usage</span>
-                        <span className="gauge-val">{formatCpuUsage(activeSnapshot.cpuPercent)}</span>
-                      </div>
-                      <div className="gauge-item">
-                        <span className="gauge-label">Memory Used</span>
-                        <span className="gauge-val">
-                          {formatMemoryUsage(activeSnapshot.memoryUsedMb, activeSnapshot.memoryTotalMb)}
-                        </span>
-                      </div>
-                      <div className="gauge-item">
-                        <span className="gauge-label">Disk Free</span>
-                        <span className="gauge-val">
-                          {formatDiskFree(activeSnapshot.diskFreeGb, activeSnapshot.diskTotalGb)}
-                        </span>
-                      </div>
-                      <div className="gauge-item">
-                        <span className="gauge-label">DNS Status</span>
-                        <span className="gauge-val">
-                          {activeSnapshot.dnsResolved === null
-                            ? 'Not sampled'
-                            : activeSnapshot.dnsResolved
-                              ? 'Healthy'
-                              : 'Failed'}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Findings List */}
-                  <div className="findings-list">
-                    {m.findings.map((f) => (
-                      <div key={f.id} className={`finding-item severity-${f.severity}`}>
-                        <div className="f-title">
-                          <span className={`badge-sev badge-${f.severity}`}>{f.severity.toUpperCase()}</span>
-                          <span>{f.id}</span>
-                        </div>
-                        <p style={{ margin: '4px 0 2px', color: '#4a4641' }}>{f.observation}</p>
-                        {f.hypothesis && (
-                          <div className="f-hyp">
-                            <em>Hypothesis:</em> {f.hypothesis}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Remediation Proposal Box */}
-                  {m.remediation && (() => {
-                    const actionDef = getCatalogAction(m.remediation.catalogActionId, m.remediation.platform);
-                    const scriptPreview = actionDef ? actionDef.renderScript(m.remediation.parameters) : null;
-                    return (
-                      <div className="remediation-box">
-                        <h5>
-                          Recommended Catalog Action: <code>{m.remediation.catalogActionId}</code> (v{m.remediation.catalogVersion})
-                        </h5>
-                        {actionDef && (
-                          <p style={{ fontSize: '13px', fontWeight: 600, color: '#1c1b1a', margin: '4px 0 2px' }}>
-                            {actionDef.title}
-                          </p>
-                        )}
-                        {actionDef && (
-                          <p style={{ fontSize: '12px', color: '#4a4641', margin: '2px 0 8px' }}>
-                            {actionDef.description}
-                          </p>
-                        )}
-                        {scriptPreview && (
-                          <div style={{ background: '#1c1b1a', color: '#f5f4f1', padding: '8px 10px', borderRadius: '4px', fontSize: '11px', fontFamily: 'monospace', marginBottom: '8px', overflowX: 'auto', whiteSpace: 'pre-wrap' }}>
-                            {scriptPreview}
-                          </div>
-                        )}
-                        <p style={{ fontSize: '12px', color: '#4a4641', margin: '4px 0 8px' }}>
-                          <strong>Consequences:</strong> {m.remediation.consequences.join('; ')}
-                        </p>
-                        <div style={{ fontSize: '11px', color: '#76736d' }}>
-                          <strong>Rollback strategy:</strong> {m.remediation.rollbackInstructions.join('; ')}
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </div>
+                <TelemetryFindingsCard
+                  findings={m.findings}
+                  activeSnapshot={activeSnapshot}
+                  remediation={m.remediation}
+                  onDownloadReport={handleDownloadReport}
+                />
               )}
             </div>
           </div>
         ))}
 
         {/* Quick Reply Chips (Fix 2) */}
-        {pendingQuickReplies.length > 0 && stage === 'deductive_questioning' && (
-          <div className="quick-replies-container">
-            <span className="quick-replies-label">Suggested replies:</span>
-            <div className="quick-replies-list">
-              {pendingQuickReplies.map((reply, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  className="quick-reply-chip"
-                  onClick={() => handleSendMessage(reply)}
-                >
-                  {reply}
-                </button>
-              ))}
-              <button
-                type="button"
-                className="quick-reply-chip"
-                style={{ background: '#fbf2eb', borderColor: '#e6cfbf', color: '#a44526', fontWeight: 600 }}
-                onClick={handleRunBrowserProbe}
-                disabled={isRunningProbe}
-              >
-                <Sparkles size={12} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />
-                {isRunningProbe ? 'Running in-browser check…' : 'Run Instant Browser Check (No Download)'}
-              </button>
-            </div>
-          </div>
+        {stage === 'deductive_questioning' && (
+          <TriageQuickReplies
+            quickReplies={pendingQuickReplies}
+            onSelectReply={handleSendMessage}
+            onRunBrowserProbe={handleRunBrowserProbe}
+            isRunningProbe={isRunningProbe}
+          />
         )}
 
         {/* Generating indicator */}
@@ -1614,7 +1584,7 @@ export function EnterpriseChatView({
                 onChange={(e) => {
                   const p = e.target.value as 'gemini' | 'openai';
                   setAiProvider(p);
-                  if (p === 'gemini') setAiModel('gemini-2.0-flash');
+                  if (p === 'gemini') setAiModel('gemini-2.5-flash');
                   else setAiModel('gpt-4o-mini');
                 }}
                 style={{
@@ -1627,7 +1597,7 @@ export function EnterpriseChatView({
                   color: '#111827',
                 }}
               >
-                <option value="gemini">Google Gemini (Recommended — Gemini 2.0 Flash)</option>
+                <option value="gemini">Google Gemini (Recommended — Gemini 2.5 Flash)</option>
                 <option value="openai">OpenAI (GPT-4o / GPT-4o-mini)</option>
               </select>
             </div>
@@ -1650,7 +1620,8 @@ export function EnterpriseChatView({
                     color: '#111827',
                   }}
                 >
-                  <option value="gemini-2.0-flash">gemini-2.0-flash (Fastest & Most Accurate)</option>
+                  <option value="gemini-2.5-flash">gemini-2.5-flash (Recommended · Fast & Intelligent)</option>
+                  <option value="gemini-2.5-pro">gemini-2.5-pro (Deep Reasoning)</option>
                   <option value="gemini-1.5-flash">gemini-1.5-flash (Standard)</option>
                   <option value="gemini-1.5-pro">gemini-1.5-pro (High Reasoning)</option>
                 </select>

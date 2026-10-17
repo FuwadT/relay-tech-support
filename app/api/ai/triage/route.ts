@@ -1,6 +1,7 @@
 import { apiError } from '../../../../lib/case-store';
 import { readJson } from '../../../../lib/validation';
 import { executeDeductiveTriage, type DeductiveTriageRequest } from '../../../../lib/enterprise/ai-provider-adapter';
+import { checkRateLimit, rateLimitResponse } from '../../../../lib/rate-limit';
 import type {
   EnterpriseTriageStage,
   EvidenceFinding,
@@ -11,6 +12,28 @@ import type {
 
 export async function POST(request: Request) {
   try {
+    // Enforce 64 KB payload size guard
+    const contentLength = Number(request.headers.get('content-length'));
+    if (contentLength > 65_536) {
+      return Response.json(
+        { ok: false, error: 'Payload exceeds 64 KB limit.' },
+        { status: 413, headers: { 'Access-Control-Allow-Origin': '*' } }
+      );
+    }
+
+    // Rate limit: 20 AI turns / min per IP
+    const clientIp =
+      request.headers.get('cf-connecting-ip') ||
+      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+      '127.0.0.1';
+    const rateCheck = checkRateLimit(`triage:${clientIp}`, {
+      windowMs: 60_000,
+      maxRequests: 20,
+    });
+    if (!rateCheck.allowed) {
+      return rateLimitResponse(rateCheck);
+    }
+
     const rawBody = await readJson(request);
     const body = (rawBody || {}) as {
       stage?: EnterpriseTriageStage;
@@ -20,6 +43,8 @@ export async function POST(request: Request) {
       snapshot?: TelemetrySnapshot | null;
       findings?: EvidenceFinding[];
       hypotheses?: TriageHypothesis[];
+      browserProbe?: DeductiveTriageRequest['browserProbe'];
+      remediation?: DeductiveTriageRequest['remediation'];
       providerConfig?: {
         provider?: ModelProvider;
         apiKey?: string;
@@ -42,6 +67,8 @@ export async function POST(request: Request) {
       snapshot: body.snapshot || null,
       findings: body.findings || [],
       hypotheses: body.hypotheses || [],
+      browserProbe: body.browserProbe || null,
+      remediation: body.remediation || null,
     };
 
     const provider = body.providerConfig?.provider || 'gemini';
@@ -55,10 +82,18 @@ export async function POST(request: Request) {
     const result = await executeDeductiveTriage(triageRequest, {
       provider,
       apiKey,
-      model: body.providerConfig?.model || (provider === 'gemini' ? 'gemini-2.0-flash' : 'gpt-4o-mini'),
-      modelAllowlist: ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gpt-4o', 'gpt-4o-mini'],
+      model: body.providerConfig?.model || (provider === 'gemini' ? 'gemini-2.5-flash' : 'gpt-4o-mini'),
+      modelAllowlist: [
+        'gemini-2.5-flash',
+        'gemini-2.5-pro',
+        'gemini-2.0-flash',
+        'gemini-1.5-flash',
+        'gemini-1.5-pro',
+        'gpt-4o',
+        'gpt-4o-mini',
+      ],
       enabled: true,
-      timeoutMs: 15000,
+      timeoutMs: 8000,
     });
 
     return Response.json(
@@ -68,6 +103,7 @@ export async function POST(request: Request) {
         headers: {
           'Cache-Control': 'no-store',
           'Access-Control-Allow-Origin': '*',
+          'x-relay-ai-mode': result.isFallback ? 'deterministic-fallback' : 'live',
         },
       }
     );

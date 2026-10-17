@@ -124,6 +124,12 @@ Write-Host "Stale user temporary files cleaned." -ForegroundColor Green
     allowedParamKeys: ['pid', 'processName'],
     renderScript: (params) => {
       const pid = typeof params.pid === 'number' ? Math.floor(params.pid) : 0;
+      if (pid <= 0) {
+        return `# Relay Remediation: Graceful Process Termination Request
+# Error: No valid process PID specified (PID must be > 0).
+Write-Host "No valid user process PID specified; cannot proceed with graceful close." -ForegroundColor Yellow
+`;
+      }
       return `# Relay Remediation: Graceful Process Termination Request
 # Target PID: ${pid} (Non-elevated, non-forced)
 
@@ -188,6 +194,13 @@ echo "DNS responder notification sent."
     allowedParamKeys: ['pid'],
     renderScript: (params) => {
       const pid = typeof params.pid === 'number' ? Math.floor(params.pid) : 0;
+      if (pid <= 0) {
+        return `#!/usr/bin/env zsh
+# Relay Remediation: Graceful SIGTERM Request (macOS)
+# Error: No valid process PID specified (PID must be > 0).
+echo "No valid user process PID specified; cannot proceed with graceful signal."
+`;
+      }
       return `#!/usr/bin/env zsh
 # Relay Remediation: Graceful SIGTERM Request (macOS)
 # Target PID: ${pid}
@@ -256,6 +269,13 @@ echo "Local resolver cache flush executed."
     allowedParamKeys: ['pid'],
     renderScript: (params) => {
       const pid = typeof params.pid === 'number' ? Math.floor(params.pid) : 0;
+      if (pid <= 0) {
+        return `#!/usr/bin/env bash
+# Relay Remediation: Graceful SIGTERM (Ubuntu)
+# Error: No valid process PID specified (PID must be > 0).
+echo "No valid user process PID specified; cannot proceed with graceful signal."
+`;
+      }
       return `#!/usr/bin/env bash
 # Relay Remediation: Graceful SIGTERM (Ubuntu)
 # Target PID: ${pid}
@@ -299,6 +319,13 @@ export function createRemediationProposal(
 ): RemediationProposal | null {
   const definition = getCatalogAction(actionId, platform);
   if (!definition) return null;
+
+  // Validate that process termination actions have a valid positive PID
+  if (definition.allowedParamKeys.includes('pid')) {
+    if (typeof params.pid !== 'number' || params.pid <= 0) {
+      return null;
+    }
+  }
 
   // Filter parameters to only allow approved parameter keys
   const safeParams: Record<string, string | number | boolean> = {};
