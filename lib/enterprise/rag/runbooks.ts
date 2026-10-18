@@ -24,7 +24,11 @@ export interface ITRunbook {
     isScript: boolean;
   }>;
   commonPitfalls: string[];
+  tenantId?: string;
+  isCustom?: boolean;
 }
+
+export type RunbookEntry = ITRunbook;
 
 export const ENTERPRISE_RUNBOOKS: readonly ITRunbook[] = [
   // ─── 1. Memory Pressure & Working Set Bloat ─────────────────────────────

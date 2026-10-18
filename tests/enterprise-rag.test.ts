@@ -9,8 +9,12 @@ import { describe, it } from 'node:test';
 import {
   tokenize,
   retrieveRunbooks,
+  retrieveRelevantRunbooks,
+  registerCustomRunbook,
+  listRunbooks,
   buildRagPromptContext,
   ENTERPRISE_RUNBOOKS,
+  type ITRunbook,
 } from '../lib/enterprise/rag';
 import type { EvidenceFinding } from '../lib/enterprise/contracts';
 
@@ -133,5 +137,50 @@ describe('Enterprise RAG: Prompt Context Formatting', () => {
   it('returns empty string when no runbooks meet threshold', () => {
     const emptyContext = buildRagPromptContext([]);
     assert.strictEqual(emptyContext, '');
+  });
+});
+
+describe('Enterprise RAG: Dynamic Runbook Registration & Hybrid Scoring', () => {
+  it('registers custom runbooks dynamically and lists them alongside built-ins', () => {
+    const customSop: ITRunbook = {
+      id: 'rb-custom-vpn-reconnect',
+      title: 'Corporate WireGuard VPN Split-Tunneling & Reconnect SOP',
+      category: 'network_dns',
+      keywords: ['wireguard', 'vpn', 'split-tunnel', 'corporate', 'intranet'],
+      findings: ['dns-unsuccessful'],
+      platforms: ['windows', 'macos', 'ubuntu'],
+      summary: 'Standard operating procedure for refreshing corporate WireGuard tunnel interfaces without rebooting.',
+      diagnosticChecks: ['Check if wg0 interface is active', 'Ping internal gateway 10.0.0.1'],
+      safeRemediations: [
+        {
+          platform: 'windows',
+          title: 'Restart WireGuard Service User Agent',
+          commandOrSteps: 'Get-Service -Name WireGuard* | Restart-Service',
+          isScript: false,
+        },
+      ],
+      commonPitfalls: ['Do not delete tunnel configuration files.'],
+      tenantId: 'tenant-acme',
+    };
+
+    registerCustomRunbook(customSop);
+
+    const allRunbooks = listRunbooks();
+    assert.ok(allRunbooks.some((rb) => rb.id === 'rb-custom-vpn-reconnect'));
+
+    const tenantRunbooks = listRunbooks('tenant-acme');
+    assert.ok(tenantRunbooks.some((rb) => rb.id === 'rb-custom-vpn-reconnect'));
+
+    const otherTenantRunbooks = listRunbooks('tenant-other');
+    assert.ok(!otherTenantRunbooks.some((rb) => rb.id === 'rb-custom-vpn-reconnect'));
+  });
+
+  it('retrieves custom runbook with BM25 term weighting and custom boost', () => {
+    const results = retrieveRelevantRunbooks('corporate wireguard vpn split-tunnel connection failed', {
+      platform: 'windows',
+    });
+    assert.ok(results.length > 0);
+    assert.strictEqual(results[0].runbook.id, 'rb-custom-vpn-reconnect');
+    assert.ok(results[0].score >= 8);
   });
 });

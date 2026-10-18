@@ -1,7 +1,7 @@
 'use client';
 
-import React from 'react';
-import { ArrowDownToLine } from 'lucide-react';
+import React, { useState } from 'react';
+import { ArrowDownToLine, Check, Copy, RotateCw, Sparkles } from 'lucide-react';
 import type {
   EvidenceFinding,
   RemediationProposal,
@@ -12,13 +12,18 @@ import {
   formatMemoryUsage,
   formatDiskFree,
 } from '@/lib/formatters';
-import { getCatalogAction } from '@/lib/enterprise/remediation-catalog';
+import { getCatalogAction, getRemediationCommand } from '@/lib/enterprise/remediation-catalog';
+import type { RemediationDiff } from '@/lib/enterprise/findings';
 
 export interface TelemetryFindingsCardProps {
   findings: EvidenceFinding[];
   activeSnapshot: TelemetrySnapshot | null;
   remediation?: RemediationProposal;
   onDownloadReport: () => void;
+  onSimulateRemediation?: () => void;
+  isSimulatingRemediation?: boolean;
+  remediationDiffs?: RemediationDiff[];
+  caseId?: string;
 }
 
 export function TelemetryFindingsCard({
@@ -26,7 +31,12 @@ export function TelemetryFindingsCard({
   activeSnapshot,
   remediation,
   onDownloadReport,
+  onSimulateRemediation,
+  isSimulatingRemediation = false,
+  remediationDiffs,
+  caseId,
 }: TelemetryFindingsCardProps): React.ReactElement {
+  const [copiedVerifyCmd, setCopiedVerifyCmd] = useState(false);
   return (
     <div className="interactive-card findings-card">
       <div className="findings-header">
@@ -126,9 +136,90 @@ export function TelemetryFindingsCard({
             <p style={{ fontSize: '12px', color: '#4a4641', margin: '4px 0 8px' }}>
               <strong>Consequences:</strong> {remediation.consequences.join('; ')}
             </p>
-            <div style={{ fontSize: '11px', color: '#76736d' }}>
+            <div style={{ fontSize: '11px', color: '#76736d', marginBottom: '10px' }}>
               <strong>Rollback strategy:</strong> {remediation.rollbackInstructions.join('; ')}
             </div>
+
+            {/* Closed-loop execution and auto-verify controls */}
+            {(() => {
+              const cmd = getRemediationCommand(remediation.catalogActionId, remediation.platform) || (remediation.platform === 'windows' ? 'ipconfig /flushdns' : 'dscacheutil -flushcache');
+              const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+              const verifyUrl = `${origin}/api/cases/${caseId || 'active'}/telemetry`;
+              const autoVerifySnippet = remediation.platform === 'windows'
+                ? `$env:RELAY_CALLBACK_URL="${verifyUrl}"; $env:RELAY_AUTO_VERIFY="1"; ${cmd}; irm ${origin}/api/collectors/windows11.ps1 | iex`
+                : `RELAY_CALLBACK_URL="${verifyUrl}" RELAY_AUTO_VERIFY="1" ${cmd}`;
+
+              return (
+                <div className="remediation-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px' }}>
+                  <button
+                    type="button"
+                    className="button primary btn-xs"
+                    onClick={() => {
+                      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                        navigator.clipboard.writeText(autoVerifySnippet).catch(() => {});
+                        setCopiedVerifyCmd(true);
+                        setTimeout(() => setCopiedVerifyCmd(false), 2000);
+                      }
+                    }}
+                  >
+                    {copiedVerifyCmd ? <Check size={13} /> : <Copy size={13} />}
+                    {copiedVerifyCmd ? 'Copied Command!' : 'Copy Remediation & Auto-Verify Command'}
+                  </button>
+
+                  {onSimulateRemediation && (
+                    <button
+                      type="button"
+                      className="button secondary btn-xs"
+                      onClick={onSimulateRemediation}
+                      disabled={isSimulatingRemediation}
+                    >
+                      {isSimulatingRemediation ? (
+                        <RotateCw size={13} className="animate-spin" />
+                      ) : (
+                        <Sparkles size={13} />
+                      )}
+                      Simulate Verification in Browser (Demo)
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Before vs After Delta Verification Badges */}
+            {remediationDiffs && remediationDiffs.length > 0 && (
+              <div
+                className="delta-verification-box"
+                style={{
+                  marginTop: '10px',
+                  padding: '8px 10px',
+                  background: '#f0fdf4',
+                  border: '1px solid #bbf7d0',
+                  borderRadius: '4px',
+                }}
+              >
+                <div style={{ fontWeight: 600, fontSize: '12px', color: '#166534', marginBottom: '4px' }}>
+                  🎯 Remediation Closed-Loop Delta Verification:
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                  {remediationDiffs.map((d, i) => (
+                    <span
+                      key={i}
+                      style={{
+                        padding: '2px 8px',
+                        borderRadius: '12px',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        background: d.improved ? '#dcfce7' : '#fef9c3',
+                        color: d.improved ? '#15803d' : '#854d0e',
+                        border: `1px solid ${d.improved ? '#86efac' : '#fde047'}`,
+                      }}
+                    >
+                      {d.badge}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         );
       })()}

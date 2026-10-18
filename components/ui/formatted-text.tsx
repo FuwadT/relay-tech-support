@@ -53,3 +53,5 @@ export function FormattedMessage({ text }: FormattedMessageProps): React.ReactEl
     </>
   );
 }
+
+export const FormattedText = FormattedMessage;

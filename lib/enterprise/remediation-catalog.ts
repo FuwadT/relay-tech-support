@@ -34,6 +34,104 @@ export interface CatalogActionDefinition {
 }
 
 /**
+ * Cross-platform Remediation Catalog Item with non-elevated user-space commands.
+ */
+export interface RemediationCatalogItem {
+  id: string;
+  title: string;
+  description: string;
+  commands: {
+    windows11: string;
+    macos: string;
+    ubuntu: string;
+  };
+  followUpCheckIds: string[];
+  requiresElevation: false;
+}
+
+/**
+ * Standard enterprise cross-platform remediation catalog with concrete CLI commands.
+ */
+export const REMEDIATION_CATALOG_ITEMS: Record<string, RemediationCatalogItem> = {
+  'catalog-net-flush-dns': {
+    id: 'catalog-net-flush-dns',
+    title: 'Flush Local DNS Resolver Cache',
+    description: 'Clears cached domain resolutions to re-query fresh name records from configured DNS resolvers.',
+    commands: {
+      windows11: 'ipconfig /flushdns',
+      macos: 'dscacheutil -flushcache',
+      ubuntu: 'resolvectl flush-caches 2>/dev/null || systemd-resolve --flush-caches 2>/dev/null || true',
+    },
+    followUpCheckIds: ['dns_resolution_check'],
+    requiresElevation: false,
+  },
+  'catalog-disk-clear-temp': {
+    id: 'catalog-disk-clear-temp',
+    title: 'Clean Stale User Temporary Files',
+    description: 'Safely removes old temporary and cache files from user-scoped temporary directories without touching system files.',
+    commands: {
+      windows11: 'Get-ChildItem -Path $env:TEMP -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | Remove-Item -Force -ErrorAction SilentlyContinue',
+      macos: 'find ~/Library/Caches -type f -atime +7 -delete 2>/dev/null || true',
+      ubuntu: 'find ~/.cache -type f -atime +7 -delete 2>/dev/null || true',
+    },
+    followUpCheckIds: ['disk_free_gb_check'],
+    requiresElevation: false,
+  },
+  'catalog-cpu-inspect-top': {
+    id: 'catalog-cpu-inspect-top',
+    title: 'Inspect Top Resource-Consuming User Processes',
+    description: 'Identifies the top 5 CPU-consuming processes in the user session without terminating them.',
+    commands: {
+      windows11: 'Get-Process | Sort-Object CPU -Descending | Select-Object -First 5 Id, ProcessName, CPU',
+      macos: 'ps -Ao pid,%cpu,%mem,comm -r | head -n 6',
+      ubuntu: 'ps -eo pid,%cpu,%mem,comm --sort=-%cpu | head -n 6',
+    },
+    followUpCheckIds: ['cpu_usage_check', 'memory_usage_check'],
+    requiresElevation: false,
+  },
+};
+
+/**
+ * Retrieves a cross-platform remediation catalog item by standard or platform-specific action ID.
+ */
+export function getRemediationCatalogItem(actionId: string): RemediationCatalogItem | null {
+  if (REMEDIATION_CATALOG_ITEMS[actionId]) {
+    return REMEDIATION_CATALOG_ITEMS[actionId];
+  }
+  if (
+    actionId === 'win-net-flush-dns-cache' ||
+    actionId === 'mac-net-flush-dns' ||
+    actionId === 'ubuntu-net-flush-resolve-cache'
+  ) {
+    return REMEDIATION_CATALOG_ITEMS['catalog-net-flush-dns'];
+  }
+  if (actionId === 'win-disk-clean-user-temp') {
+    return REMEDIATION_CATALOG_ITEMS['catalog-disk-clear-temp'];
+  }
+  if (
+    actionId === 'win-proc-graceful-request' ||
+    actionId === 'mac-proc-graceful-term' ||
+    actionId === 'ubuntu-proc-graceful-term'
+  ) {
+    return REMEDIATION_CATALOG_ITEMS['catalog-cpu-inspect-top'];
+  }
+  return null;
+}
+
+/**
+ * Returns the concrete non-elevated CLI command for a catalog action on the given platform.
+ */
+export function getRemediationCommand(
+  actionId: string,
+  platform: DevicePlatform | 'windows11',
+): string | null {
+  const item = getRemediationCatalogItem(actionId);
+  if (!item) return null;
+  const key = platform === 'windows' || platform === 'windows11' ? 'windows11' : platform;
+  return item.commands[key] ?? null;
+}
+
+/**
  * Approved Catalog Actions.
  * All scripts are strictly non-elevated and non-destructive.
  */

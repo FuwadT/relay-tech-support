@@ -35,6 +35,9 @@ const MACOS_COLLECTOR_SCRIPT = extractConstant('MACOS_COLLECTOR_SCRIPT');
 const isCheckMode = process.argv.includes('--check');
 
 const TARGETS = [
+  { file: 'enterprise/collectors/windows.ps1', content: WINDOWS_COLLECTOR_SCRIPT },
+  { file: 'enterprise/collectors/ubuntu.sh', content: UBUNTU_COLLECTOR_SCRIPT },
+  { file: 'enterprise/collectors/macos.sh', content: MACOS_COLLECTOR_SCRIPT },
   { file: 'public/collectors/windows.ps1', content: WINDOWS_COLLECTOR_SCRIPT },
   { file: 'public/collectors/windows11.ps1', content: WINDOWS_COLLECTOR_SCRIPT },
   { file: 'public/collectors/ubuntu.sh', content: UBUNTU_COLLECTOR_SCRIPT },

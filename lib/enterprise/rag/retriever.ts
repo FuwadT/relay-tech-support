@@ -39,8 +39,48 @@ export function tokenize(text: string): string[] {
     .filter((t) => t.length > 2);
 }
 
+const _customRunbooks: ITRunbook[] = [];
+
 /**
- * Retrieves the most relevant IT runbooks for a user query and telemetry state.
+ * Registers a custom runbook/SOP dynamically at runtime.
+ */
+export function registerCustomRunbook(runbook: ITRunbook): void {
+  const idx = _customRunbooks.findIndex((rb) => rb.id === runbook.id);
+  const entry: ITRunbook = {
+    ...runbook,
+    isCustom: true,
+  };
+  if (idx >= 0) {
+    _customRunbooks[idx] = entry;
+  } else {
+    _customRunbooks.push(entry);
+  }
+}
+
+/**
+ * Lists all registered and built-in runbooks, optionally filtered by tenantId.
+ */
+export function listRunbooks(tenantId?: string): ITRunbook[] {
+  const all = [..._customRunbooks, ...ENTERPRISE_RUNBOOKS];
+  if (!tenantId) return all;
+  return all.filter((rb) => !rb.tenantId || rb.tenantId === tenantId);
+}
+
+/**
+ * Symptom domain keywords mapped to runbook categories for hybrid boosting.
+ */
+const SYMPTOM_DOMAINS: Record<string, string[]> = {
+  memory: ['ram', 'memory', 'sluggish', 'paging', 'leak', 'working set', 'freeze'],
+  cpu_thermal: ['cpu', 'fan', 'heat', 'hot', 'thermal', 'noise', 'throttling', 'spin'],
+  network_dns: ['dns', 'domain', 'network', 'wifi', 'reach', 'resolve', 'ping', 'latency', 'portal'],
+  disk_io: ['disk', 'storage', 'space', 'full', 'io', 'clean', 'temp'],
+  application: ['crash', 'exit', 'error', '403', 'forbidden', 'stale', 'cookie', 'session'],
+  general: ['slow', 'troubleshoot', 'hang', 'glitch'],
+};
+
+/**
+ * Retrieves the most relevant IT runbooks for a user query and telemetry state
+ * using BM25-weighted lexical term saturation, title/tag weighting, and symptom domain boosting.
  */
 export function retrieveRunbooks(
   query: string,
@@ -60,11 +100,14 @@ export function retrieveRunbooks(
     ...findings.map((f) => f.id),
   ]);
 
-  const queryTokens = new Set(tokenize(query));
+  const queryTokens = tokenize(query);
+  const queryTokenSet = new Set(queryTokens);
+  const queryLower = query.toLowerCase();
 
   const scored: ScoredRunbook[] = [];
+  const candidateRunbooks = listRunbooks();
 
-  for (const rb of ENTERPRISE_RUNBOOKS) {
+  for (const rb of candidateRunbooks) {
     // Platform compatibility filter
     if (platform && !rb.platforms.includes(platform)) {
       continue;
@@ -87,11 +130,34 @@ export function retrieveRunbooks(
       score += 5;
     }
 
-    // 3. Keyword matching (+3 per matched keyword/token)
+    // 3. Custom tenant SOP priority boost (+2)
+    if (rb.isCustom) {
+      score += 2;
+    }
+
+    // 4. BM25-style weighted term frequency scoring
+    // Count token occurrences across title (3.0x), keywords (2.5x), and summary/checks (1.0x)
+    const titleText = rb.title.toLowerCase();
+    const keywordsText = rb.keywords.join(' ').toLowerCase();
+    const bodyText = `${rb.summary} ${rb.diagnosticChecks.join(' ')}`.toLowerCase();
+
+    for (const token of queryTokenSet) {
+      let tf = 0;
+      if (titleText.includes(token)) tf += 3.0;
+      if (keywordsText.includes(token)) tf += 2.5;
+      if (bodyText.includes(token)) tf += 1.0;
+
+      if (tf > 0) {
+        // BM25 term saturation with k1 = 1.2
+        score += (tf * 2.2) / (tf + 1.2);
+      }
+    }
+
+    // 5. Keyword exact/phrase matching (+3 per matched keyword)
     for (const kw of rb.keywords) {
       const kwTokens = tokenize(kw);
-      const isMatch = kwTokens.some((t) => queryTokens.has(t));
-      if (isMatch || query.toLowerCase().includes(kw)) {
+      const isMatch = kwTokens.some((t) => queryTokenSet.has(t));
+      if (isMatch || queryLower.includes(kw.toLowerCase())) {
         score += 3;
         if (!matchedKeywords.includes(kw)) {
           matchedKeywords.push(kw);
@@ -99,18 +165,24 @@ export function retrieveRunbooks(
       }
     }
 
-    // 4. Title token overlap (+2 per match)
+    // 6. Title token overlap (+2 per match)
     const titleTokens = tokenize(rb.title);
     for (const t of titleTokens) {
-      if (queryTokens.has(t)) {
+      if (queryTokenSet.has(t)) {
         score += 2;
       }
+    }
+
+    // 7. Symptom domain boosting (+3 if query shares symptom domain indicators)
+    const domainIndicators = SYMPTOM_DOMAINS[rb.category] || [];
+    if (domainIndicators.some((ind) => queryLower.includes(ind))) {
+      score += 3;
     }
 
     if (score >= minScoreThreshold) {
       scored.push({
         runbook: rb,
-        score,
+        score: Math.round(score * 10) / 10,
         matchedKeywords,
         matchedFindings,
       });
@@ -122,6 +194,9 @@ export function retrieveRunbooks(
 
   return scored.slice(0, maxResults);
 }
+
+/** Alias conforming to the Phase 4 specification */
+export const retrieveRelevantRunbooks = retrieveRunbooks;
 
 /**
  * Builds an IT Knowledge Base context snippet suitable for LLM system prompt injection.

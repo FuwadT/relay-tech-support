@@ -1,7 +1,7 @@
 // Exercise the installed D1 adapter's object-row batch mapping, not just SQL.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
@@ -59,3 +59,20 @@ test('D1 object-row replay retains current case fields after updates and recogni
     assert.deepEqual(await createIdempotentCase(db, { ...row, id: 'deleted-retry' }, key, input), { outcome: 'deleted' });
   } finally { sqlite.close(); }
 });
+
+test('all drizzle/*.sql migrations are registered in drizzle/meta/_journal.json', () => {
+  const journal = JSON.parse(readFileSync('drizzle/meta/_journal.json', 'utf8'));
+  const registeredTags = new Set(journal.entries.map((e: { tag: string }) => e.tag));
+  const sqlFiles = readdirSync('drizzle')
+    .filter((file) => /^\d{4}_.*\.sql$/.test(file))
+    .map((file) => file.replace(/\.sql$/, ''));
+
+  assert.ok(sqlFiles.length >= 6, 'Expected at least 6 migrations in drizzle/');
+  for (const tag of sqlFiles) {
+    assert.ok(
+      registeredTags.has(tag),
+      `Migration drizzle/${tag}.sql is not registered in drizzle/meta/_journal.json`,
+    );
+  }
+});
+

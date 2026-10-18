@@ -51,6 +51,17 @@ import {
   getMeasurementDefinitions,
 } from '@/lib/diagnostics';
 import { EnterpriseChatView } from './enterprise-chat-view';
+import {
+  detectClientPlatform,
+  formatPlatformLabel,
+  formatCpuUsage,
+  formatMemoryUsage,
+  formatDiskFree,
+} from '@/lib/formatters';
+import { FormattedText } from '@/components/ui/formatted-text';
+import { TelemetryFindingsCard } from '@/components/diagnostics/telemetry-findings-card';
+import { CollectorInstructionsCard } from '@/components/diagnostics/collector-instructions-card';
+import { TriageQuickReplies } from '@/components/diagnostics/triage-quick-replies';
 
 export type ViewState = 'overview' | 'cases' | 'new' | 'detail' | 'queue' | 'metrics' | 'triage';
 
@@ -151,12 +162,7 @@ export default function TechSupportApp({
   const retryTrigger = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    if (typeof navigator !== 'undefined') {
-      const ua = navigator.userAgent.toLowerCase();
-      if (ua.includes('win')) setDetectedPlatformLabel('Windows 11');
-      else if (ua.includes('mac')) setDetectedPlatformLabel('macOS');
-      else if (ua.includes('linux') || ua.includes('ubuntu')) setDetectedPlatformLabel('Ubuntu Linux');
-    }
+    setDetectedPlatformLabel(formatPlatformLabel(detectClientPlatform()));
   }, []);
 
   useEffect(() => {
@@ -1570,7 +1576,7 @@ export default function TechSupportApp({
                   <section className="panel report">
                     <p className="eyebrow">SUMMARY OF YOUR CHECKS</p>
                     <h2>{analysis.headline}</h2>
-                    <p>{analysis.summary}</p>
+                    <p><FormattedText text={analysis.summary} /></p>
 
                     <h3>Before &amp; after comparison</h3>
                     <p>Concrete comparison between your baseline and follow-up measurements.</p>
@@ -1615,14 +1621,14 @@ export default function TechSupportApp({
                     <h3>What your observations tell us</h3>
                     <ul>
                       {analysis.findings.map((f) => (
-                        <li key={f}>{f}</li>
+                        <li key={f}><FormattedText text={f} /></li>
                       ))}
                     </ul>
 
                     <h3>Next steps to consider</h3>
                     <ol>
                       {analysis.nextSteps.map((f) => (
-                        <li key={f}>{f}</li>
+                        <li key={f}><FormattedText text={f} /></li>
                       ))}
                     </ol>
 

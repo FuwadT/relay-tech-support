@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { verifyRemediationDelta } from '../lib/enterprise/findings';
 import type { TelemetrySnapshot } from '../lib/enterprise/contracts';
+import type { RateLimitStore } from '../lib/rate-limit';
 
 function sampleSnapshot(overrides: Partial<TelemetrySnapshot> = {}): TelemetrySnapshot {
   return {
@@ -82,4 +83,46 @@ test('verifyRemediationDelta flags Gateway Latency improvement when reduced by >
   assert.ok(latDiff);
   assert.equal(latDiff.improved, true);
   assert.ok(latDiff.badge.includes('✅'));
+});
+
+test('remediation catalog provides concrete user-space commands for all platforms', async () => {
+  const { getRemediationCatalogItem, getRemediationCommand } = await import('../lib/enterprise/remediation-catalog');
+
+  const dnsItem = getRemediationCatalogItem('catalog-net-flush-dns');
+  assert.ok(dnsItem !== null);
+  assert.equal(getRemediationCommand('catalog-net-flush-dns', 'windows11'), 'ipconfig /flushdns');
+  assert.equal(getRemediationCommand('catalog-net-flush-dns', 'macos'), 'dscacheutil -flushcache');
+  assert.ok(getRemediationCommand('catalog-net-flush-dns', 'ubuntu')?.includes('resolvectl'));
+
+  const diskItem = getRemediationCatalogItem('catalog-disk-clear-temp');
+  assert.ok(diskItem !== null);
+  assert.ok(getRemediationCommand('catalog-disk-clear-temp', 'windows11')?.includes('$env:TEMP'));
+
+  const cpuItem = getRemediationCatalogItem('catalog-cpu-inspect-top');
+  assert.ok(cpuItem !== null);
+  assert.ok(getRemediationCommand('catalog-cpu-inspect-top', 'windows11')?.includes('Get-Process'));
+});
+
+test('checkRateLimit supports custom RateLimitStore adapter and bounded capacity', async () => {
+  const { checkRateLimit } = await import('../lib/rate-limit');
+
+  const customMap = new Map<string, number[]>();
+  const mockStore: RateLimitStore = {
+    get: (key) => customMap.get(key),
+    put: (key, timestamps) => {
+      customMap.set(key, timestamps);
+    },
+  };
+
+  const res1 = checkRateLimit('test-key', { windowMs: 1000, maxRequests: 2 }, mockStore);
+  assert.equal(res1.allowed, true);
+  assert.equal(res1.remaining, 1);
+  assert.ok(customMap.has('test-key'));
+
+  const res2 = checkRateLimit('test-key', { windowMs: 1000, maxRequests: 2 }, mockStore);
+  assert.equal(res2.allowed, true);
+  assert.equal(res2.remaining, 0);
+
+  const res3 = checkRateLimit('test-key', { windowMs: 1000, maxRequests: 2 }, mockStore);
+  assert.equal(res3.allowed, false);
 });

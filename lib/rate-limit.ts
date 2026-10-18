@@ -25,8 +25,27 @@ export interface RateLimitResult {
   resetAt: number;
 }
 
-/** Per-key sliding window: timestamps of recent requests. */
+/** Pluggable store adapter for distributed or isolate-local storage. */
+export interface RateLimitStore {
+  get(key: string): number[] | null | undefined;
+  put(key: string, timestamps: number[], ttlMs: number): void;
+}
+
+const MAX_RATE_LIMIT_KEYS = 10_000;
+
+/** Per-key sliding window: timestamps of recent requests (bounded LRU cap). */
 const _windows = new Map<string, number[]>();
+
+function enforceStoreCap(): void {
+  if (_windows.size >= MAX_RATE_LIMIT_KEYS) {
+    // Evict oldest 10% entries to prevent memory exhaustion under high key churn
+    const evictCount = Math.floor(MAX_RATE_LIMIT_KEYS * 0.1) || 1;
+    const keys = Array.from(_windows.keys()).slice(0, evictCount);
+    for (const k of keys) {
+      _windows.delete(k);
+    }
+  }
+}
 
 /**
  * Checks whether the given key is within its rate limit.
@@ -34,13 +53,18 @@ const _windows = new Map<string, number[]>();
  *
  * @param key      Unique identifier for the rate-limit bucket (e.g. IP or caseId).
  * @param opts     Window size and request cap.
+ * @param store    Optional custom storage adapter (e.g., KV, D1, or isolate memory).
  */
-export function checkRateLimit(key: string, opts: RateLimitOptions): RateLimitResult {
+export function checkRateLimit(
+  key: string,
+  opts: RateLimitOptions,
+  store?: RateLimitStore,
+): RateLimitResult {
   const now = Date.now();
   const cutoff = now - opts.windowMs;
 
   // Retrieve or initialize the sliding window for this key
-  let timestamps = _windows.get(key) ?? [];
+  let timestamps = store ? (store.get(key) ?? []) : (_windows.get(key) ?? []);
 
   // Evict timestamps outside the current window
   timestamps = timestamps.filter((t) => t > cutoff);
@@ -49,13 +73,22 @@ export function checkRateLimit(key: string, opts: RateLimitOptions): RateLimitRe
 
   if (timestamps.length >= opts.maxRequests) {
     // Do NOT record the denied attempt — only successful passes count
-    _windows.set(key, timestamps);
+    if (store) {
+      store.put(key, timestamps, opts.windowMs);
+    } else {
+      _windows.set(key, timestamps);
+    }
     return { allowed: false, remaining: 0, resetAt };
   }
 
   // Record this allowed attempt
   timestamps.push(now);
-  _windows.set(key, timestamps);
+  if (store) {
+    store.put(key, timestamps, opts.windowMs);
+  } else {
+    enforceStoreCap();
+    _windows.set(key, timestamps);
+  }
 
   return {
     allowed: true,

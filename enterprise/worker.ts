@@ -14,6 +14,13 @@ import type {
   TelemetrySnapshot,
   TriageHypothesis,
 } from '../lib/enterprise/contracts';
+import { verifyRemediationDelta } from '../lib/enterprise/findings';
+import {
+  getRemediationCatalogItem,
+  getRemediationCommand,
+  REMEDIATION_CATALOG_ITEMS,
+} from '../lib/enterprise/remediation-catalog';
+import { registerCustomRunbook, listRunbooks, type ITRunbook } from '../lib/enterprise/rag';
 
 export interface EnterpriseEnvironment {
   ENTERPRISE_DB: D1Database;
@@ -101,6 +108,110 @@ export async function handleEnterpriseRequest(request: Request, env: EnterpriseE
         return json({ ok: true, caseId, telemetry: parsed.value }, 200);
       }
       return new Response(null, { status: 405, headers: { Allow: 'POST, OPTIONS' } });
+    }
+
+    // Closed-Loop Remediation Verification Route
+    const remediationMatch = /^\/api\/cases\/([0-9a-f-]+)\/remediation$/i.exec(url.pathname);
+    if (remediationMatch) {
+      const caseId = remediationMatch[1];
+      if (request.method === 'OPTIONS') {
+        return new Response(null, {
+          status: 204,
+          headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type',
+          },
+        });
+      }
+      if (request.method === 'GET') {
+        const platform = (url.searchParams.get('platform') || 'windows11') as DevicePlatform | 'windows11';
+        const actionId = url.searchParams.get('actionId') || 'catalog-net-flush-dns';
+        const item = getRemediationCatalogItem(actionId);
+        const command = getRemediationCommand(actionId, platform);
+        return json({
+          ok: true,
+          caseId,
+          item: item ?? REMEDIATION_CATALOG_ITEMS['catalog-net-flush-dns'],
+          command: command ?? 'ipconfig /flushdns',
+          catalog: Object.values(REMEDIATION_CATALOG_ITEMS),
+        }, 200);
+      }
+      if (request.method === 'POST') {
+        const raw = (await boundedJson(request)) as {
+          beforeSnapshot?: unknown;
+          afterSnapshot?: unknown;
+          actionId?: string;
+          executedCommand?: string;
+        };
+        if (!raw || !raw.beforeSnapshot || !raw.afterSnapshot) {
+          return json({ ok: false, error: 'Both beforeSnapshot and afterSnapshot are required for delta verification.' }, 400);
+        }
+        const beforeValid = validateTelemetrySnapshot(raw.beforeSnapshot);
+        if (beforeValid.ok === false) {
+          return json({ ok: false, error: `Invalid beforeSnapshot: ${beforeValid.error}` }, 400);
+        }
+        const afterValid = validateTelemetrySnapshot(raw.afterSnapshot);
+        if (afterValid.ok === false) {
+          return json({ ok: false, error: `Invalid afterSnapshot: ${afterValid.error}` }, 400);
+        }
+        const diffs = verifyRemediationDelta(beforeValid.value, afterValid.value);
+        const anyImproved = diffs.some((d) => d.improved);
+        const nowIso = new Date().toISOString();
+        return json({
+          ok: true,
+          caseId,
+          actionId: raw.actionId ?? 'catalog-net-flush-dns',
+          executedCommand: raw.executedCommand ?? null,
+          status: anyImproved ? 'resolved_verified' : 'investigating',
+          diffs,
+          verified: anyImproved,
+          verifiedAt: anyImproved ? nowIso : null,
+        }, 200);
+      }
+      return new Response(null, { status: 405, headers: { Allow: 'GET, POST, OPTIONS' } });
+    }
+
+    // Dynamic RAG Runbook Ingestion and Query Endpoints
+    if (url.pathname === '/api/enterprise/runbooks') {
+      if (request.method === 'OPTIONS') {
+        return new Response(null, {
+          status: 204,
+          headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type',
+          },
+        });
+      }
+      if (request.method === 'GET') {
+        const tenantId = url.searchParams.get('tenantId') || undefined;
+        const runbooks = listRunbooks(tenantId);
+        return json({ ok: true, count: runbooks.length, runbooks }, 200);
+      }
+      if (request.method === 'POST') {
+        const raw = (await boundedJson(request)) as Partial<ITRunbook>;
+        if (!raw || typeof raw !== 'object' || !raw.id || !raw.title || !raw.summary) {
+          return json({ ok: false, error: 'Runbook requires valid id, title, and summary.' }, 400);
+        }
+        const runbook: ITRunbook = {
+          id: String(raw.id),
+          title: String(raw.title),
+          category: (raw.category as any) || 'general',
+          keywords: Array.isArray(raw.keywords) ? raw.keywords.map(String) : [],
+          findings: Array.isArray(raw.findings) ? raw.findings.map(String) : [],
+          platforms: Array.isArray(raw.platforms) ? (raw.platforms as DevicePlatform[]) : ['windows', 'macos', 'ubuntu'],
+          summary: String(raw.summary),
+          diagnosticChecks: Array.isArray(raw.diagnosticChecks) ? raw.diagnosticChecks.map(String) : [],
+          safeRemediations: Array.isArray(raw.safeRemediations) ? raw.safeRemediations : [],
+          commonPitfalls: Array.isArray(raw.commonPitfalls) ? raw.commonPitfalls.map(String) : [],
+          tenantId: raw.tenantId ? String(raw.tenantId) : undefined,
+          isCustom: true,
+        };
+        registerCustomRunbook(runbook);
+        return json({ ok: true, message: 'Custom runbook registered successfully.', runbook }, 201);
+      }
+      return new Response(null, { status: 405, headers: { Allow: 'GET, POST, OPTIONS' } });
     }
 
     // Dedicated AI Triage Route

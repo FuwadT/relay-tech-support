@@ -18,6 +18,20 @@ export function detectClientPlatform(): DevicePlatform {
   return 'windows';
 }
 
+/** Formats a DevicePlatform into human-readable label */
+export function formatPlatformLabel(platform: DevicePlatform): string {
+  switch (platform) {
+    case 'windows':
+      return 'Windows 11';
+    case 'macos':
+      return 'macOS';
+    case 'ubuntu':
+      return 'Ubuntu Linux';
+    default:
+      return platform;
+  }
+}
+
 /** Safe CPU usage formatter avoiding bare '%' when unsampled or NaN. */
 export function formatCpuUsage(cpuPercent?: number | null): string {
   if (typeof cpuPercent !== 'number' || Number.isNaN(cpuPercent)) {
