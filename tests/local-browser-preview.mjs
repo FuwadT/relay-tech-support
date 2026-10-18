@@ -11,8 +11,15 @@ const fixtureId = process.env.RELAY_TEST_BROWSER_OWNER_ID ?? `browser-fixture-${
 if (!/^browser-fixture-[a-zA-Z0-9-]{1,100}$/.test(fixtureId)) throw new Error('Synthetic browser fixture ID required.');
 let loseCreateResponse = process.env.RELAY_TEST_LOSE_CREATE_RESPONSE_ONCE === '1';
 http.createServer((incoming, outgoing) => {
-  if (incoming.headers.host !== `127.0.0.1:${port}` ||
-      (incoming.headers.origin && incoming.headers.origin !== origin)) {
+  const host = incoming.headers.host || '';
+  const isAllowedHost = host === `127.0.0.1:${port}` || host === `localhost:${port}`;
+  const originHeader = incoming.headers.origin;
+  const isAllowedOrigin =
+    !originHeader ||
+    originHeader === `http://127.0.0.1:${port}` ||
+    originHeader === `http://localhost:${port}`;
+
+  if (!isAllowedHost || !isAllowedOrigin) {
     incoming.resume();
     outgoing.writeHead(403).end('Local QA origin required.');
     return;

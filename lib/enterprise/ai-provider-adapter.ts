@@ -261,6 +261,11 @@ export interface DeductiveTriageRequest {
     targetProcess?: string;
     requiresElevation?: boolean;
   } | null;
+  providerConfig?: {
+    provider?: ModelProvider;
+    apiKey?: string;
+    model?: string;
+  };
 }
 
 /**
@@ -340,19 +345,96 @@ export function buildDeductiveTriage(request: DeductiveTriageRequest): Deductive
     };
   }
 
-  // Meta / Operational / Assistant status questions
-  if (/is gemini working|is the ai working|are you (gemini|ai|working)|who are you|what are you/i.test(lowerMsg)) {
+  // Meta / Operational / Assistant status questions (e.g. "is gemini connected?")
+  if (
+    /(is\s+)?(gemini|openai|ai|api\s*key|model)\s+(still\s+)?(working|connected|active|online|enabled|available)|are\s+you\s+(gemini|ai|working|online)|who\s+are\s+you|what\s+are\s+you|is\s+it\s+connected/i.test(
+      lowerMsg,
+    )
+  ) {
+    const provider = request.providerConfig?.provider || 'gemini';
+    const providerName = provider === 'openai' ? 'OpenAI' : 'Google Gemini';
+    const modelName =
+      request.providerConfig?.model ||
+      (provider === 'openai' ? 'gpt-4o-mini' : 'gemini-2.5-flash');
+    const hasKey = Boolean(
+      request.providerConfig?.apiKey?.trim() ||
+        (provider === 'gemini'
+          ? process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY
+          : process.env.OPENAI_API_KEY || process.env.NEXT_PUBLIC_OPENAI_API_KEY),
+    );
+
+    const reply = hasKey
+      ? `Yes, **${providerName}** (${modelName}) is active and connected to Relay Assistant! Real-time deductive analysis and enterprise IT runbooks are available to isolate workstation issues without administrative privileges.\n\nWhat specific issue or symptom are you noticing today?`
+      : `Relay Assistant is currently operating in **deterministic offline rules mode**. To enable live **${providerName}** generative AI triage, click the **Connect AI Key** button in the top header and enter your Google AI Studio API key.`;
+
     return {
-      stage: stage === 'active_investigation' ? 'active_investigation' : 'deductive_questioning',
-      reply:
-        'Yes, Relay Assistant is active and ready to assist! When your Gemini API key is connected, responses are synthesized with live telemetry and curated enterprise IT runbooks. What specific issue or symptom are you noticing?',
+      stage: stage === 'active_investigation' ? 'active_investigation' : (stage || 'deductive_questioning'),
+      reply,
       quickReplies: [
+        'My computer is slow',
+        'How to check Task Manager',
         'Run instant browser check',
         'Run read-only system check',
-        'Show manual troubleshooting steps',
       ],
       hypotheses: [
-        { id: 'hyp-status', domain: 'application', summary: 'AI assistant active and ready for diagnostics', confidence: 1.0, status: 'confirmed' },
+        {
+          id: 'hyp-status',
+          domain: 'application',
+          summary: `AI assistant active (${hasKey ? providerName : 'offline rules'})`,
+          confidence: 1.0,
+          status: 'confirmed',
+        },
+      ],
+      recommendedAction: 'ask_clarifying_question',
+      addressedSymptomMismatch: false,
+    };
+  }
+
+  // Operational how-to: Task Manager / Activity Monitor / Process inspection
+  if (
+    /task\s*manager|activity\s*monitor|process\s*manager|check\s*(for\s*)?(cpu|processes|memory|startup)|how\s+(do\s+i|to)\s+check/i.test(
+      lowerMsg,
+    )
+  ) {
+    const isMac = request.platform === 'macos';
+    const isLinux = request.platform === 'ubuntu';
+
+    const reply = isMac
+      ? `Here is how to check Activity Monitor on **macOS**:\n\n` +
+        `1. **Launch**: Press \`Cmd + Space\` to open Spotlight, type \`Activity Monitor\`, and press \`Enter\`.\n` +
+        `2. **Sort by CPU**: Click the **% CPU** column header to see which processes are utilizing the processor.\n` +
+        `3. **Sort by Memory**: Click the **Memory** tab at the top to see which applications are consuming RAM.\n\n` +
+        `Once open, check if a browser renderer or background application is at the top of the list.`
+      : isLinux
+      ? `Here is how to check running processes on **Ubuntu Linux**:\n\n` +
+        `1. **System Monitor**: Open the Applications launcher and select **System Monitor** (or run \`gnome-system-monitor\` in a terminal).\n` +
+        `2. **Terminal Quick Check**: Open a terminal and run \`top\` or \`htop\`.\n` +
+        `3. **Sort Resources**: Press \`Shift + P\` in \`top\` to sort by CPU, or \`Shift + M\` to sort by Memory.\n\n` +
+        `Review which services or applications are driving high resource consumption.`
+      : `Here is how to open and check Task Manager on **Windows 11**:\n\n` +
+        `1. **Instant Keyboard Shortcut**: Press \`Ctrl + Shift + Esc\` simultaneously to launch Task Manager directly.\n` +
+        `2. **Alternative**: Right-click the **Start menu button** (or an empty area of the Taskbar) and select **Task Manager**.\n` +
+        `3. **Sort by Usage**: On the **Processes** tab, click the **CPU** or **Memory** column header to sort highest consumers to the top.\n` +
+        `4. **Startup Apps**: Click the **Startup apps** icon (speedometer) on the left sidebar to see and disable unneeded background utilities.\n\n` +
+        `Check which process is utilizing the most resources, or we can run an automated instant check:`;
+
+    return {
+      stage: stage === 'active_investigation' ? 'active_investigation' : (stage || 'deductive_questioning'),
+      reply,
+      quickReplies: [
+        'Checked — CPU is high',
+        'Checked — Memory is high',
+        'Run instant browser check',
+        'Run read-only system check',
+      ],
+      hypotheses: [
+        {
+          id: 'hyp-proc',
+          domain: 'cpu_thermal',
+          summary: 'User reviewing processes in OS Task Manager',
+          confidence: 0.75,
+          status: 'active',
+        },
       ],
       recommendedAction: 'ask_clarifying_question',
       addressedSymptomMismatch: false,
@@ -563,7 +645,7 @@ export function buildDeductiveTriage(request: DeductiveTriageRequest): Deductive
   }
 
   // Network, Wi-Fi, DNS
-  if (/wifi|wi-fi|dns|network|internet|connect|disconnect|offline|load/i.test(lowerMsg)) {
+  if (/wifi|wi-fi|dns\b|gateway\b|router\b|latency|ping\b|slow internet|no internet|\b(cannot|unable to|can't|failing to)\s+connect\b|connection\s+drop|disconnect|offline\b/i.test(lowerMsg)) {
     return {
       stage: 'deductive_questioning',
       reply: 'Network and DNS disruptions can stem from local gateway drops, DHCP leases, or stale hostname caches. Are all websites failing to load, or only specific company or internal domains?',
@@ -890,6 +972,8 @@ CRITICAL OPERATIONAL RULES:
 3. Zero-Install Resolution First: Whenever possible, provide immediate, non-invasive troubleshooting steps before suggesting collector scripts.
 4. Socratic & Deductive when Unmeasured: If telemetry is NOT yet collected and the issue is ambiguous, ask ONE focused clarifying question or propose running the zero-install browser check or read-only OS inspection.
 5. Direct Technical Answers: If the user asks a specific question, answer that question directly, accurately, and with step-by-step instructions.
+   - If the user asks whether Gemini or AI is connected: Confirm clearly that Google Gemini is connected and active as Relay Assistant, explain that you are ready with live telemetry synthesis and enterprise runbooks, and ask what workstation issue they would like to investigate.
+   - If the user asks how to open/check Task Manager: Provide exact Windows 11 instructions (shortcut: Ctrl+Shift+Esc, or right-click Start menu > Task Manager, Processes tab to sort CPU/Memory, Startup apps tab). If macOS, specify Activity Monitor (Cmd+Space). If Linux, specify top/htop/System Monitor.
 6. Terminal Output & Feedback: If the user pastes terminal output or reports that a script skipped or PID was not found, acknowledge the output, explain why it occurred (e.g. process already exited or session boundary), and provide non-elevated next steps. Never reset back to the authorization card.
 7. Never Target PID 0: Windows PID 0 is the System Idle Process and cannot be managed or closed.
 8. Output JSON: You MUST respond strictly in valid JSON matching this schema:
@@ -1245,6 +1329,14 @@ export async function executeDeductiveTriage(
     provider === 'gemini' && requestedModel === 'gemini-2.0-flash'
       ? 'gemini-2.5-flash'
       : requestedModel;
+
+  if (!request.providerConfig) {
+    request.providerConfig = {
+      provider,
+      apiKey,
+      model,
+    };
+  }
 
   let fallbackReason: string | undefined = undefined;
 

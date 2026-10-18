@@ -157,6 +157,14 @@ function getDeductiveBranch(prompt: string): DeductiveBranch {
 
 function getZeroInstallSteps(answer: string, category: string): string[] {
   const a = answer.toLowerCase();
+  if (a.includes('task manager') || a.includes('taskmanager') || a.includes('activity monitor') || a.includes('how to check')) {
+    return [
+      'Press Ctrl + Shift + Esc directly to launch Task Manager instantly (or Cmd + Space > Activity Monitor on macOS).',
+      'Right-click the Start menu button or Taskbar and choose "Task Manager" as an alternative.',
+      'On the Processes tab, click the CPU or Memory column header to sort processes by highest resource usage.',
+      'On the Startup apps tab (speedometer icon), right-click and disable unneeded background utilities.',
+    ];
+  }
   if (a.includes('portal') || a.includes('cache') || a.includes('permission') || a.includes('cookie') || category === 'portal_cache') {
     return [
       'Click the site settings / padlock icon (🔒 or ⚙️) directly beside the portal URL in your address bar.',
@@ -316,7 +324,7 @@ export function EnterpriseChatView({
   const [activeCase, setActiveCase] = useState<EnterpriseCase | null>(null);
   const [activeSnapshot, setActiveSnapshot] = useState<TelemetrySnapshot | null>(null);
   const [activeFindings, setActiveFindings] = useState<EvidenceFinding[]>([]);
-  const [, setActiveRemediation] = useState<RemediationProposal | null>(null);
+  const [activeRemediation, setActiveRemediation] = useState<RemediationProposal | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const [caseSaving, setCaseSaving] = useState(false);
 
@@ -903,6 +911,75 @@ export function EnterpriseChatView({
 
     // STAGE 2: deductive_questioning -> Zero-Install or Authorization (Fix 2)
     if (stage === 'deductive_questioning') {
+      if (/(is\s+)?(gemini|openai|ai|api\s*key|model)\s+(still\s+)?(working|connected|active|online|enabled)|are\s+you\s+(gemini|ai)/i.test(lower)) {
+        const providerName = aiProvider === 'openai' ? 'OpenAI' : 'Google Gemini';
+        const reply = aiApiKey
+          ? `Yes, **${providerName}** (${aiModel}) is connected to Relay Assistant! What specific issue or symptom are you noticing?`
+          : `Relay Assistant is currently operating in **deterministic offline rules mode**. To enable live Gemini AI triage, click **Connect AI Key** in the top right header.`;
+        setTimeout(() => {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              sender: 'assistant',
+              text: reply,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            },
+          ]);
+        }, 300);
+        return;
+      }
+
+      if (/task\s*manager|activity\s*monitor|process\s*manager|how\s+to\s+check/i.test(lower)) {
+        const isMac = selectedPlatform === 'macos';
+        const isLinux = selectedPlatform === 'ubuntu';
+        const reply = isMac
+          ? `**How to open Activity Monitor on macOS:**\n\n1. Press \`Cmd + Space\`, type \`Activity Monitor\`, and press \`Enter\`.\n2. Click the **% CPU** or **Memory** tab to sort processes by highest resource usage.`
+          : isLinux
+          ? `**How to check processes on Ubuntu Linux:**\n\n1. Press \`Ctrl + Alt + T\` and run \`top\` or \`htop\`.\n2. Press \`Shift + P\` to sort by CPU, or \`Shift + M\` to sort by Memory.`
+          : `**How to open Task Manager on Windows 11:**\n\n1. **Shortcut**: Press \`Ctrl + Shift + Esc\` directly to launch Task Manager.\n2. **Alternative**: Right-click the **Start menu button** or Taskbar and select **Task Manager**.\n3. **Processes**: Click the **CPU** or **Memory** column header to sort highest consumers to the top.\n4. **Startup Apps**: Click the **Startup apps** tab (speedometer icon) on the left sidebar to review and disable high-impact startup utilities.`;
+
+        setTimeout(() => {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              sender: 'assistant',
+              text: reply,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            },
+          ]);
+          setPendingQuickReplies([
+            'Checked — CPU is high',
+            'Checked — Memory is high',
+            'Run instant browser check',
+            'Run read-only system check',
+          ]);
+        }, 300);
+        return;
+      }
+
+      const alreadyHasZeroInstall = messages.some((m) => m.cardType === 'zero-install');
+      if (alreadyHasZeroInstall) {
+        setTimeout(() => {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              sender: 'assistant',
+              text: `Since the zero-install steps haven't fully resolved the sluggishness, let's proceed with an automated diagnostic. Would you like to run the **zero-install browser check** right now, or capture a **read-only OS inspection snapshot**?`,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            },
+          ]);
+          setPendingQuickReplies([
+            'Run instant browser check',
+            'Run read-only system check',
+            'How to check Task Manager',
+          ]);
+        }, 300);
+        return;
+      }
+
       setPendingQuickReplies([]);
       const steps = getZeroInstallSteps(text, reportedSymptomCategory);
       setTimeout(() => {
@@ -923,6 +1000,48 @@ export function EnterpriseChatView({
 
     // STAGE 3: awaiting_authorization
     if (stage === 'awaiting_authorization') {
+      if (/(is\s+)?(gemini|openai|ai|api\s*key|model)\s+(still\s+)?(working|connected|active|online|enabled)|are\s+you\s+(gemini|ai)/i.test(lower)) {
+        const providerName = aiProvider === 'openai' ? 'OpenAI' : 'Google Gemini';
+        const reply = aiApiKey
+          ? `Yes, **${providerName}** (${aiModel}) is connected to Relay Assistant! When you authorize the diagnostic inspection below, Gemini will automatically synthesize your system metrics and process tree.`
+          : `Relay Assistant is currently operating in **deterministic offline rules mode**. You can click **Connect AI Key** in the top header to enter your API key, or proceed with offline diagnostics below.`;
+        setTimeout(() => {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              sender: 'assistant',
+              text: reply,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            },
+          ]);
+        }, 300);
+        return;
+      }
+
+      if (/task\s*manager|activity\s*monitor|process\s*manager|how\s+to\s+check/i.test(lower)) {
+        const isMac = selectedPlatform === 'macos';
+        const isLinux = selectedPlatform === 'ubuntu';
+        const reply = isMac
+          ? `**How to open Activity Monitor on macOS:**\n\n1. Press \`Cmd + Space\`, type \`Activity Monitor\`, and press \`Enter\`.\n2. Click the **% CPU** or **Memory** tab to sort processes by highest resource usage.`
+          : isLinux
+          ? `**How to check processes on Ubuntu Linux:**\n\n1. Press \`Ctrl + Alt + T\` and run \`top\` or \`htop\`.\n2. Press \`Shift + P\` to sort by CPU, or \`Shift + M\` to sort by Memory.`
+          : `**How to open Task Manager on Windows 11:**\n\n1. **Shortcut**: Press \`Ctrl + Shift + Esc\` directly to launch Task Manager.\n2. **Alternative**: Right-click the **Start menu button** or Taskbar and select **Task Manager**.\n3. **Processes**: Click the **CPU** or **Memory** column header to sort highest consumers to the top.\n4. **Startup Apps**: Click the **Startup apps** tab (speedometer icon) on the left sidebar to review and disable high-impact startup utilities.`;
+
+        setTimeout(() => {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              sender: 'assistant',
+              text: `${reply}\n\nWhenever you're ready, you can also authorize the automated read-only collector card above to capture these metrics automatically.`,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            },
+          ]);
+        }, 300);
+        return;
+      }
+
       setTimeout(() => {
         setMessages((prev) => [
           ...prev,

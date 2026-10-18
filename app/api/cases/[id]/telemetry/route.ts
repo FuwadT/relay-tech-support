@@ -1,3 +1,6 @@
+import { eq } from 'drizzle-orm';
+import { getDb } from '../../../../../db';
+import { cases } from '../../../../../db/schema';
 import { apiError } from '../../../../../lib/case-store';
 import { readJson } from '../../../../../lib/validation';
 import { validateTelemetrySnapshot } from '../../../../../lib/enterprise/telemetry-validation';
@@ -5,6 +8,37 @@ import { redactTelemetryPayload } from '../../../../../lib/telemetry-redactor';
 import { checkRateLimit, rateLimitResponse } from '../../../../../lib/rate-limit';
 
 type Context = { params: Promise<{ id: string }> };
+
+export async function GET(request: Request, context: Context) {
+  try {
+    const { id } = await context.params;
+    const db = getDb();
+    const [row] = await db.select().from(cases).where(eq(cases.id, id)).limit(1);
+    if (!row) {
+      return Response.json(
+        { ok: false, error: 'Case not found.' },
+        { status: 404, headers: { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' } }
+      );
+    }
+
+    return Response.json(
+      {
+        ok: true,
+        caseId: id,
+        telemetry: row.analysisSnapshot ?? null,
+      },
+      {
+        status: 200,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'no-store',
+        },
+      }
+    );
+  } catch (error) {
+    return apiError(error);
+  }
+}
 
 export async function POST(request: Request, context: Context) {
   try {
@@ -41,6 +75,20 @@ export async function POST(request: Request, context: Context) {
     // Redact PII (user paths, private IPs, MAC addresses, API keys) before persistence
     const { payload: redacted, redactedFieldsCount } = redactTelemetryPayload(parsed.value);
 
+    // Save to database if case exists
+    try {
+      const db = getDb();
+      await db
+        .update(cases)
+        .set({
+          analysisSnapshot: redacted as any,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(cases.id, id));
+    } catch {
+      // Non-blocking if case is memory-only fixture
+    }
+
     return Response.json(
       {
         ok: true,
@@ -66,7 +114,7 @@ export async function OPTIONS() {
     status: 204,
     headers: {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
     },
   });

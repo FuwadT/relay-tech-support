@@ -69,6 +69,7 @@ export async function POST(request: Request) {
       hypotheses: body.hypotheses || [],
       browserProbe: body.browserProbe || null,
       remediation: body.remediation || null,
+      providerConfig: body.providerConfig,
     };
 
     const provider = body.providerConfig?.provider || 'gemini';
