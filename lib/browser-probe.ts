@@ -254,3 +254,98 @@ export function analyzeBrowserProbe(probe: BrowserDiagnosticProbeResult): Browse
     potentialSoftwareRendering: isSoftwareRenderer,
   };
 }
+
+/**
+ * Detects whether a user message or assistant prompt indicates intent to run the
+ * zero-install client-side browser WebAPI diagnostic.
+ */
+export function isBrowserProbeIntent(text: string, lastAssistantText?: string): boolean {
+  if (!text || typeof text !== 'string') return false;
+  const lower = text.toLowerCase().trim();
+
+  // 1. Direct explicit phrases and variations
+  if (
+    lower.includes('browser check') ||
+    lower.includes('browser diagnostic') ||
+    lower.includes('browser probe') ||
+    lower.includes('browser tool') ||
+    lower.includes('browser test') ||
+    lower.includes('check browser') ||
+    lower.includes('test browser') ||
+    lower.includes('probe browser') ||
+    lower.includes('run the browser') ||
+    lower.includes('run browser') ||
+    lower.includes('instant check') ||
+    lower.includes('instant browser') ||
+    lower.includes('no download') ||
+    lower.includes('zero install') ||
+    lower.includes('zero-install') ||
+    lower.includes('run the install') ||
+    lower.includes('run install') ||
+    lower.includes('webapi probe') ||
+    lower.includes('webapi diagnostic') ||
+    lower.includes('webapi check') ||
+    lower === 'run instant browser diagnostic (no download)' ||
+    lower === 'run instant browser check (no download)'
+  ) {
+    return true;
+  }
+
+  // 2. Affirmative reply to assistant's offer to run the browser diagnostic
+  if (lastAssistantText) {
+    const lastLower = lastAssistantText.toLowerCase();
+    const assistantOfferedBrowserProbe =
+      lastLower.includes('browser diagnostic') ||
+      lastLower.includes('browser check') ||
+      lastLower.includes('zero-install diagnostic') ||
+      lastLower.includes('zero-install') ||
+      lastLower.includes("browser's performance") ||
+      lastLower.includes('browser tool') ||
+      lastLower.includes('client-side webapi probe');
+
+    if (assistantOfferedBrowserProbe) {
+      if (
+        /^(yes|yeah|yep|sure|ok|okay|please|go ahead|run it|run that|do it|yes please|start it|proceed|let's do it|lets do it|run the install|run install)\b/i.test(lower) ||
+        lower === 'yes' ||
+        lower === 'run it' ||
+        lower === 'sure' ||
+        lower === 'ok' ||
+        lower === 'okay' ||
+        lower === 'please' ||
+        lower === 'go ahead'
+      ) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Detects whether a user message expresses an explicit request to run the
+ * read-only deep system check / active telemetry collector snapshot.
+ */
+export function isExplicitSystemCheckIntent(text: string): boolean {
+  if (!text || typeof text !== 'string') return false;
+  const lower = text.toLowerCase().trim();
+
+  return (
+    lower === 'run read-only system check' ||
+    lower === 'run deep system check' ||
+    lower === 'run system check' ||
+    lower === 'still happening — run deep system check' ||
+    lower === 'authorize & start investigation' ||
+    lower === 'start deep check' ||
+    lower === 'skip to os collector' ||
+    lower === 'collect a snapshot' ||
+    lower === 'take a snapshot' ||
+    lower.includes('collect a snapshot') ||
+    lower.includes('collect snapshot') ||
+    lower.includes('telemetry snapshot') ||
+    lower.includes('os collector') ||
+    lower.includes('run collector') ||
+    /^(please\s+)?(run|start|take|collect)\s+(the\s+)?(deep\s+|read-only\s+|os\s+|telemetry\s+)?(system\s+check|snapshot|collector)$/i.test(lower)
+  );
+}
+

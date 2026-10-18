@@ -51,6 +51,8 @@ import { getCollectorScript } from '@/lib/enterprise/collector-scripts';
 import {
   runBrowserDiagnosticProbe,
   analyzeBrowserProbe,
+  isBrowserProbeIntent,
+  isExplicitSystemCheckIntent,
 } from '@/lib/browser-probe';
 import { detectClientPlatform } from '@/lib/formatters';
 import { FormattedMessage } from '@/components/ui/formatted-text';
@@ -389,25 +391,26 @@ export function EnterpriseChatView({
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const handleRunBrowserProbe = async () => {
+  const handleRunBrowserProbe = async (options?: { skipUserMessage?: boolean }) => {
     if (isRunningProbe) return;
     setIsRunningProbe(true);
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    setMessages((prev) => [
-      ...prev,
-      {
+    const initialMessages: Message[] = [];
+    if (!options?.skipUserMessage) {
+      initialMessages.push({
         id: crypto.randomUUID(),
         sender: 'user',
         text: 'Run Instant Browser Diagnostic (No Download)',
         timestamp: now,
-      },
-      {
-        id: crypto.randomUUID(),
-        sender: 'assistant',
-        text: 'Running zero-install client-side WebAPI probe (checking hardware concurrency, memory capacity, network ping, and GPU renderer)...',
-        timestamp: now,
-      },
-    ]);
+      });
+    }
+    initialMessages.push({
+      id: crypto.randomUUID(),
+      sender: 'assistant',
+      text: 'Running zero-install client-side WebAPI probe (checking hardware concurrency, memory capacity, network ping, and GPU renderer)...',
+      timestamp: now,
+    });
+    setMessages((prev) => [...prev, ...initialMessages]);
 
     try {
       const result = await runBrowserDiagnosticProbe(
@@ -725,15 +728,9 @@ export function EnterpriseChatView({
     ]);
     setInputPrompt('');
 
-    const lower = text.toLowerCase();
-    if (
-      lower.includes('run instant browser check') ||
-      lower.includes('run browser check') ||
-      lower.includes('browser check now') ||
-      lower.includes('instant browser check') ||
-      lower === 'run instant browser check (no download)'
-    ) {
-      void handleRunBrowserProbe();
+    const lastAssistantMsg = [...messages].reverse().find((m) => m.sender === 'assistant')?.text;
+    if (isBrowserProbeIntent(text, lastAssistantMsg)) {
+      void handleRunBrowserProbe({ skipUserMessage: true });
       return;
     }
 
@@ -767,15 +764,7 @@ export function EnterpriseChatView({
       trimmed.length > 80;
 
     const isExplicitSystemCheckRequest =
-      !isTerminalOutput &&
-      (lower === 'run read-only system check' ||
-        lower === 'run deep system check' ||
-        lower === 'run system check' ||
-        lower === 'still happening — run deep system check' ||
-        lower === 'authorize & start investigation' ||
-        lower === 'start deep check' ||
-        lower === 'skip to os collector' ||
-        /^(please\s+)?(run|start)\s+(the\s+)?(deep\s+|read-only\s+)?system\s+check$/i.test(lower));
+      !isTerminalOutput && isExplicitSystemCheckIntent(text);
 
     if (isExplicitSystemCheckRequest) {
       setPendingQuickReplies([]);
@@ -881,6 +870,14 @@ export function EnterpriseChatView({
             },
           ]);
           setIsGenerating(false);
+
+          if (
+            aiResponse.recommendedAction === 'run_browser_probe' ||
+            aiResponse.stage === 'browser_probe' ||
+            /(initiating|running|starting)\s+(the\s+)?(zero-install\s+|client-side\s+)?(browser\s+|webapi\s+)?(diagnostic|probe|check|tool)/i.test(replyText)
+          ) {
+            void handleRunBrowserProbe({ skipUserMessage: true });
+          }
           return;
         }
       }
@@ -1618,12 +1615,12 @@ export function EnterpriseChatView({
           </div>
         ))}
 
-        {/* Quick Reply Chips (Fix 2) */}
-        {stage === 'deductive_questioning' && (
+        {/* Quick Reply Chips */}
+        {pendingQuickReplies.length > 0 && !isGenerating && (
           <TriageQuickReplies
             quickReplies={pendingQuickReplies}
             onSelectReply={handleSendMessage}
-            onRunBrowserProbe={handleRunBrowserProbe}
+            onRunBrowserProbe={!activeBrowserProbe ? () => handleRunBrowserProbe() : undefined}
             isRunningProbe={isRunningProbe}
           />
         )}

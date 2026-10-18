@@ -24,6 +24,7 @@ import type {
 } from './contracts';
 import { getCatalogAction } from './remediation-catalog';
 import { retrieveRunbooks, buildRagPromptContext } from './rag';
+import { isBrowserProbeIntent, isExplicitSystemCheckIntent } from '../browser-probe';
 
 export interface AIProviderConfig {
   provider: ModelProvider;
@@ -557,12 +558,12 @@ export function buildDeductiveTriage(request: DeductiveTriageRequest): Deductive
   }
 
   // 3. Browser WebAPI Diagnostic Check Request
-  if (lowerMsg.includes('browser check') || lowerMsg.includes('instant check') || lowerMsg.includes('no download') || stage === 'browser_probe') {
+  const lastAssistantText = conversationHistory.slice().reverse().find((m) => m.sender === 'assistant')?.text;
+  if (isBrowserProbeIntent(userMessage, lastAssistantText) || stage === 'browser_probe') {
     return {
       stage: 'browser_probe',
-      reply: 'We can run an instant in-browser WebAPI diagnostic right now with zero downloads and no terminal access. This checks hardware concurrency, memory capacity, network ping, and GPU renderer.',
+      reply: 'Running zero-install client-side WebAPI probe (checking hardware concurrency, memory capacity, network ping, and GPU renderer)...',
       quickReplies: [
-        'Run browser check now',
         'Skip to OS collector',
         'Cancel',
       ],
@@ -575,16 +576,7 @@ export function buildDeductiveTriage(request: DeductiveTriageRequest): Deductive
   }
 
   // 4. Deep OS Collector Request (explicit user requests only)
-  const isExplicitCollectorRequest =
-    lowerMsg === 'run read-only system check' ||
-    lowerMsg === 'run deep system check' ||
-    lowerMsg === 'run system check' ||
-    lowerMsg === 'still happening — run deep system check' ||
-    lowerMsg === 'authorize & start investigation' ||
-    lowerMsg === 'skip to os collector' ||
-    /^(please\s+)?(run|start)\s+(the\s+)?(deep\s+|read-only\s+)?system\s+check$/i.test(lowerMsg);
-
-  if (isExplicitCollectorRequest) {
+  if (isExplicitSystemCheckIntent(userMessage)) {
     return {
       stage: 'awaiting_authorization',
       reply: 'To capture live OS-level processor, disk, and socket telemetry, please select your workstation platform and authorize the read-only inspection collector.',
@@ -971,9 +963,22 @@ CRITICAL OPERATIONAL RULES:
    - Never generate elevation commands (sudo, RunAs) or destructive force-kills.
 3. Zero-Install Resolution First: Whenever possible, provide immediate, non-invasive troubleshooting steps before suggesting collector scripts.
 4. Socratic & Deductive when Unmeasured: If telemetry is NOT yet collected and the issue is ambiguous, ask ONE focused clarifying question or propose running the zero-install browser check or read-only OS inspection.
+   - Zero-Install Browser WebAPI Diagnostic: The browser probe executes 100% locally on the client machine via JavaScript WebAPIs (hardware concurrency, device memory, GPU WebGL renderer, network ping). It requires ZERO installation, zero downloads, and completes in < 1.5 seconds.
+   - When the user asks to run, tests, agrees to, or confirms running the browser diagnostic or tool (e.g. "yes", "run the install", "run browser tool", "run diagnostic", "run zero install", "check browser", "run the browser"):
+     * Set "recommendedAction": "run_browser_probe".
+     * Set "stage": "browser_probe".
+     * Acknowledge that the zero-install client-side WebAPI diagnostic is running now.
+     * CRITICAL: NEVER state or hallucinate that you are "awaiting results from that diagnostic", that "transmission takes time", or that you sent a request to a remote system. The probe executes locally in their browser.
+   - When the user asks to run the deep OS inspection, collect a snapshot, or run collector scripts (e.g. "collect a snapshot", "run deep system check", "run system check", "take snapshot"):
+     * Set "recommendedAction": "request_os_collector".
+     * Set "stage": "awaiting_authorization".
+     * Prompt the user to authorize the read-only inspection card below.
 5. Direct Technical Answers: If the user asks a specific question, answer that question directly, accurately, and with step-by-step instructions.
    - If the user asks whether Gemini or AI is connected: Confirm clearly that Google Gemini is connected and active as Relay Assistant, explain that you are ready with live telemetry synthesis and enterprise runbooks, and ask what workstation issue they would like to investigate.
    - If the user asks how to open/check Task Manager: Provide exact Windows 11 instructions (shortcut: Ctrl+Shift+Esc, or right-click Start menu > Task Manager, Processes tab to sort CPU/Memory, Startup apps tab). If macOS, specify Activity Monitor (Cmd+Space). If Linux, specify top/htop/System Monitor.
+   - If the user asks why the browser diagnostic hasn't run, did not return results, or is taking long:
+     * Explain clearly that the zero-install browser diagnostic is run directly in their web browser via client-side WebAPIs (no files to install).
+     * Set "recommendedAction": "run_browser_probe" so the client executes the probe immediately.
 6. Terminal Output & Feedback: If the user pastes terminal output or reports that a script skipped or PID was not found, acknowledge the output, explain why it occurred (e.g. process already exited or session boundary), and provide non-elevated next steps. Never reset back to the authorization card.
 7. Never Target PID 0: Windows PID 0 is the System Idle Process and cannot be managed or closed.
 8. Output JSON: You MUST respond strictly in valid JSON matching this schema:
