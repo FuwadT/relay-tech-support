@@ -386,5 +386,56 @@ describe('Phase 3: Gemini API Multi-Turn Content Formatting Invariant', () => {
       assert.notStrictEqual(turns[i].role, turns[i - 1].role);
     }
   });
+
+  it('executeDeductiveTriage isolates OS bottleneck when browser probe is healthy without asking browser scope questions', async () => {
+    const res = await executeDeductiveTriage({
+      stage: 'deductive_questioning',
+      userMessage: 'my computer is running slowly',
+      platform: 'windows',
+      browserProbe: {
+        platform: 'windows11',
+        hardwareConcurrency: 16,
+        deviceMemoryGb: 16,
+        networkOnline: true,
+        apiPingMs: 20,
+        gpuRenderer: 'ANGLE (NVIDIA RTX 5060 Ti)',
+        isHealthy: true,
+        storageUsageGb: 0,
+        storageQuotaGb: 10,
+      },
+    });
+
+    assert.strictEqual(res.stage, 'awaiting_authorization');
+    assert.strictEqual(res.recommendedAction, 'request_os_collector');
+    assert.ok(res.reply.toLowerCase().includes('in-browser metrics and gpu acceleration are healthy'));
+    assert.ok(res.reply.toLowerCase().includes('isolated to the operating system level'));
+    assert.ok(res.quickReplies.includes('Authorize & start investigation'));
+  });
+
+  it('active_investigation synthesizes top processes during high memory utilization', () => {
+    const memSnapshot: TelemetrySnapshot = {
+      ...mockSnapshot,
+      cpuPercent: 12,
+      memoryTotalMb: 16384,
+      memoryUsedMb: 14500, // > 85%
+      processes: [
+        { pid: 101, name: 'slack.exe', memoryMb: 1800, cpuPercent: 2 },
+        { pid: 102, name: 'teams.exe', memoryMb: 1400, cpuPercent: 1 },
+      ],
+    };
+
+    const res = buildDeductiveTriage({
+      stage: 'active_investigation',
+      userMessage: 'What is consuming all my RAM?',
+      platform: 'windows',
+      snapshot: memSnapshot,
+    });
+
+    assert.strictEqual(res.stage, 'active_investigation');
+    assert.ok(res.reply.includes('slack.exe'));
+    assert.ok(res.reply.includes('teams.exe'));
+    assert.strictEqual(res.recommendedAction, 'propose_remediation');
+  });
 });
+
 

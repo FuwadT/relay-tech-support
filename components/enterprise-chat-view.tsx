@@ -734,6 +734,58 @@ export function EnterpriseChatView({
       return;
     }
 
+    const lower = text.trim().toLowerCase();
+
+    // 1. Authorize & start investigation
+    if (lower.includes('authorize & start') || lower === 'authorize & start investigation') {
+      setPendingQuickReplies([]);
+      void handleAuthorizeAndInvestigate();
+      return;
+    }
+
+    // 2. Telemetry simulations
+    if (lower.includes('simulate high cpu') || lower === 'simulate cpu') {
+      setPendingQuickReplies([]);
+      handleRunSimulation('cpu');
+      return;
+    }
+
+    if (lower.includes('simulate low disk') || lower === 'simulate disk') {
+      setPendingQuickReplies([]);
+      handleRunSimulation('disk');
+      return;
+    }
+
+    if (lower.includes('simulate dns fault') || lower === 'simulate dns') {
+      setPendingQuickReplies([]);
+      handleRunSimulation('dns');
+      return;
+    }
+
+    if (lower.includes('simulate memory') || lower.includes('simulate high memory')) {
+      setPendingQuickReplies([]);
+      handleRunSimulation('memory');
+      return;
+    }
+
+    // 3. 1-Click Paste Clipboard
+    if (lower.includes('paste from clipboard') || lower.includes('1-click paste')) {
+      void handleOneClickPasteClipboard();
+      return;
+    }
+
+    // 4. Offline Report download
+    if ((lower.includes('offline report') || lower.includes('download report') || lower.includes('export report')) && activeCase) {
+      handleDownloadReport();
+      return;
+    }
+
+    // 5. Remediation execution / review
+    if ((lower.includes('execute remediation') || lower.includes('review recommended fix') || lower.includes('simulate remediation')) && activeRemediation) {
+      handleSimulateRemediation(activeRemediation);
+      return;
+    }
+
     const trimmed = text.trim();
 
     // If user pasted PowerShell Get-Process table, parse rows into activeSnapshot
@@ -1114,10 +1166,8 @@ export function EnterpriseChatView({
 
   // Handles explicit device authorization and case initialization
   const handleAuthorizeAndInvestigate = async () => {
-    if (!deviceAuthorized || !storageConsent) {
-      alert('Please check both required authorization checkboxes before proceeding.');
-      return;
-    }
+    setDeviceAuthorized(true);
+    setStorageConsent(true);
 
     setCaseSaving(true);
     const newCaseId = crypto.randomUUID();
@@ -1136,6 +1186,12 @@ export function EnterpriseChatView({
     setActiveCase(caseRecord);
     setCaseSaving(false);
     setStage('awaiting_telemetry');
+    setPendingQuickReplies([
+      'Simulate High CPU',
+      'Simulate Low Disk',
+      'Simulate DNS Fault',
+      '1-Click Paste from Clipboard',
+    ]);
 
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     setMessages((prev) => [

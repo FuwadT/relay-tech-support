@@ -535,10 +535,20 @@ export function buildDeductiveTriage(request: DeductiveTriageRequest): Deductive
       const memPct = Math.round(((snapshot.memoryUsedMb || 0) / (snapshot.memoryTotalMb || 1)) * 100);
       const usedGb = ((snapshot.memoryUsedMb || 0) / 1024).toFixed(1);
       const totalGb = ((snapshot.memoryTotalMb || 1) / 1024).toFixed(1);
-      reply = `Your active telemetry snapshot confirms high memory utilization at **${memPct}%** (${usedGb} / ${totalGb} GB). This frequently triggers page thrashing. Would you like to inspect top memory-consuming processes or discard background browser tabs?`;
+      const topProcs = (snapshot.processes || [])
+        .slice(0, 3)
+        .map((p) => `\`${p.name}\` (${p.memoryMb ? p.memoryMb + ' MB' : p.cpuPercent ? p.cpuPercent + '% CPU' : 'active'})`)
+        .join(', ');
+      const procInfo = topProcs ? ` Top processes: ${topProcs}.` : '';
+      reply = `Your active telemetry snapshot confirms high memory utilization at **${memPct}%** (${usedGb} / ${totalGb} GB).${procInfo} This frequently triggers page thrashing. Would you like to inspect top memory-consuming processes or discard background browser tabs?`;
       updatedHypotheses.push({ id: 'hyp-mem', domain: 'memory', summary: 'High physical memory pressure confirmed by telemetry', confidence: 0.9, status: 'confirmed' });
     } else {
-      reply = `Based on your active telemetry snapshot, memory is at ${snapshot.memoryUsedMb ? Math.round(((snapshot.memoryUsedMb) / (snapshot.memoryTotalMb || 1)) * 100) + '%' : 'normal'} and network status is ${snapshot.dnsResolved === false ? 'Degraded (DNS failing)' : 'Healthy'}. What specific behavior would you like to drill into next?`;
+      const topProcs = (snapshot.processes || [])
+        .slice(0, 3)
+        .map((p) => `\`${p.name}\``)
+        .join(', ');
+      const procInfo = topProcs ? ` Active observed processes include: ${topProcs}.` : '';
+      reply = `Based on your active telemetry snapshot, memory is at ${snapshot.memoryUsedMb ? Math.round(((snapshot.memoryUsedMb) / (snapshot.memoryTotalMb || 1)) * 100) + '%' : 'normal'} and network status is ${snapshot.dnsResolved === false ? 'Degraded (DNS failing)' : 'Healthy'}.${procInfo} What specific behavior would you like to drill into next?`;
       updatedHypotheses.push({ id: 'hyp-gen', domain: 'application', summary: 'System telemetry under review', confidence: 0.7, status: 'active' });
     }
 
@@ -814,6 +824,31 @@ export function buildDeductiveTriage(request: DeductiveTriageRequest): Deductive
 
   // Slowness without fan noise
   if (/freez|freeze|sluggish|slow|lag|unresponsive/i.test(lowerMsg)) {
+    if (request.browserProbe && request.browserProbe.isHealthy) {
+      return {
+        stage: 'awaiting_authorization',
+        reply:
+          'Because core in-browser metrics and GPU acceleration are healthy, the slowdown is isolated to the operating system level. Let’s proceed to a non-elevated read-only diagnostic inspection to measure live CPU, memory, and running processes:',
+        quickReplies: [
+          'Authorize & start investigation',
+          'Simulate High CPU',
+          'Simulate Low Disk',
+          'Simulate DNS Fault',
+        ],
+        hypotheses: [
+          {
+            id: 'hyp-os',
+            domain: 'cpu_thermal',
+            summary: 'In-browser performance confirmed healthy; isolating OS-level bottleneck',
+            confidence: 0.85,
+            status: 'active',
+          },
+        ],
+        recommendedAction: 'request_os_collector',
+        addressedSymptomMismatch: false,
+      };
+    }
+
     if (!hasAskedSlownessScope) {
       return {
         stage: 'deductive_questioning',
@@ -886,6 +921,31 @@ export function buildDeductiveTriage(request: DeductiveTriageRequest): Deductive
 
   // Default deductive questioning fallback — Anti-Loop Guard
   if (hasAskedTiming || userHistory.length >= 2) {
+    if (request.browserProbe && request.browserProbe.isHealthy) {
+      return {
+        stage: 'awaiting_authorization',
+        reply:
+          'Because core in-browser metrics and GPU acceleration are healthy, the slowdown is isolated to the operating system level. Let’s proceed to a non-elevated read-only diagnostic inspection to measure live CPU, memory, and running processes:',
+        quickReplies: [
+          'Authorize & start investigation',
+          'Simulate High CPU',
+          'Simulate Low Disk',
+          'Simulate DNS Fault',
+        ],
+        hypotheses: [
+          {
+            id: 'hyp-os',
+            domain: 'cpu_thermal',
+            summary: 'System resource contention under OS investigation',
+            confidence: 0.7,
+            status: 'active',
+          },
+        ],
+        recommendedAction: 'request_os_collector',
+        addressedSymptomMismatch: false,
+      };
+    }
+
     return {
       stage: 'deductive_questioning',
       reply:
@@ -1141,8 +1201,12 @@ async function callGeminiTriage(
     contextPrefix,
   );
 
+  const contextInstruction = contextPrefix
+    ? `\n\nACTIVE WORKSTATION TELEMETRY & DIAGNOSTIC EVIDENCE:\n${contextPrefix}\n`
+    : '';
+
   const payload = {
-    system_instruction: { parts: [{ text: RELAY_TRIAGE_SYSTEM_PROMPT + ragContext }] },
+    system_instruction: { parts: [{ text: RELAY_TRIAGE_SYSTEM_PROMPT + contextInstruction + ragContext }] },
     contents,
     generationConfig: {
       temperature: 0.2,
@@ -1204,8 +1268,13 @@ async function callOpenAITriage(
   });
   const ragContext = buildRagPromptContext(scoredRunbooks, request.platform);
 
+  const contextPrefix = buildTriageContextPrefix(request);
+  const contextInstruction = contextPrefix
+    ? `\n\nACTIVE WORKSTATION TELEMETRY & DIAGNOSTIC EVIDENCE:\n${contextPrefix}\n`
+    : '';
+
   const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-    { role: 'system', content: RELAY_TRIAGE_SYSTEM_PROMPT + ragContext },
+    { role: 'system', content: RELAY_TRIAGE_SYSTEM_PROMPT + contextInstruction + ragContext },
   ];
 
   if (request.conversationHistory && request.conversationHistory.length > 0) {
@@ -1214,7 +1283,6 @@ async function callOpenAITriage(
     }
   }
 
-  const contextPrefix = buildTriageContextPrefix(request);
   const currentPrompt = `${contextPrefix}\n\n${request.userMessage}`;
   messages.push({ role: 'user', content: currentPrompt });
 
